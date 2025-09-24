@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:planmate_app/presentation/features/home/pages/home_page.dart';
 import '../../user/bloc/user_bloc.dart';
 import '../../user/bloc/user_event.dart';
 import '../../user/bloc/user_state.dart';
-import '../widgets/change_password_dialog.dart'; // Import dialog
+import '../widgets/change_password_dialog.dart';
 
-// Giải thích: Trang này dành riêng cho việc quản lý thông tin người dùng.
-// Nó lắng nghe UserBloc để hiển thị dữ liệu và kết quả của các hành động.
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -19,44 +16,46 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   void initState() {
     super.initState();
-    // Gọi event để tải thông tin user ngay khi trang được xây dựng
     context.read<UserBloc>().add(FetchUserProfile());
   }
 
   @override
   Widget build(BuildContext context) {
-    return BlocConsumer<UserBloc, UserState>(
-      listener: (context, state) {
-        if (state is UserOperationSuccess) {
-          if (Navigator.of(context).canPop()) {
-            Navigator.of(context).pop();
+    return Scaffold(
+      appBar: AppBar(title: const Text('Hồ sơ & Cài đặt')),
+      body: BlocListener<UserBloc, UserState>(
+        listener: (context, state) {
+          if (state is UserOperationSuccess) {
+            if (Navigator.of(context, rootNavigator: true).canPop()) {
+              Navigator.of(context, rootNavigator: true).pop();
+            }
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(state.message),
+                backgroundColor: Colors.green,
+              ),
+            );
+          } else if (state is UserOperationFailure) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(state.message),
+                backgroundColor: Colors.red,
+              ),
+            );
           }
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(state.message),
-              backgroundColor: Colors.green,
-            ),
-          );
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const HomePage()),
-            (route) => false,
-          );
-        } else if (state is UserOperationFailure) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(state.message), backgroundColor: Colors.red),
-          );
-        }
-      },
-      builder: (context, state) {
-        if (state is UserProfileLoaded) {
-          return _buildProfileView(context, state);
-        }
-        return const Center(child: CircularProgressIndicator());
-      },
+        },
+        child: BlocBuilder<UserBloc, UserState>(
+          builder: (context, state) {
+            if (state is UserProfileLoaded) {
+              return _buildProfileView(context, state);
+            }
+            return const Center(child: CircularProgressIndicator());
+          },
+        ),
+      ),
     );
   }
 
-  // Widget hiển thị thông tin chi tiết của người dùng
   Widget _buildProfileView(BuildContext context, UserProfileLoaded state) {
     return ListView(
       padding: const EdgeInsets.all(16.0),
@@ -79,9 +78,7 @@ class _ProfilePageState extends State<ProfilePage> {
         ListTile(
           leading: const Icon(Icons.date_range_outlined),
           title: const Text('Ngày tham gia'),
-          subtitle: Text(
-            state.profile.createdAt,
-          ), // Cần format lại ngày tháng cho đẹp
+          subtitle: Text(state.profile.createdAt),
         ),
         const Divider(height: 32),
         const Text(
@@ -94,7 +91,6 @@ class _ProfilePageState extends State<ProfilePage> {
           title: const Text('Đổi mật khẩu'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () {
-            // Hiển thị dialog để người dùng nhập mật khẩu
             showDialog(
               context: context,
               builder: (_) => const ChangePasswordDialog(),

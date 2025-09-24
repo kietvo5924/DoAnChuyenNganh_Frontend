@@ -2,8 +2,6 @@ abstract class AuthEvent {
   const AuthEvent();
 }
 
-class AuthCheckStatusRequested extends AuthEvent {}
-
 class SignInRequested extends AuthEvent {
   final String email;
   final String password;
@@ -24,3 +22,7 @@ class SignUpRequested extends AuthEvent {
 }
 
 class SignOutRequested extends AuthEvent {}
+
+class SignInAsGuestRequested extends AuthEvent {}
+
+class GuestWantsToLogin extends AuthEvent {}

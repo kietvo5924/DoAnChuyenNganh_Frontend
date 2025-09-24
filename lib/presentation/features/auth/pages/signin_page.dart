@@ -18,8 +18,7 @@ class SignInPage extends StatelessWidget {
       appBar: AppBar(title: const Text('Đăng Nhập')),
       body: BlocListener<AuthBloc, AuthState>(
         listener: (context, state) {
-          if (state is AuthSignInSuccess) {
-            // Dùng pushReplacement để người dùng không thể nhấn back quay lại trang đăng nhập
+          if (state is AuthSignInSuccess || state is AuthGuestSuccess) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(builder: (_) => const HomePage()),
             );
@@ -83,6 +82,13 @@ class SignInPage extends StatelessWidget {
                   },
                 ),
                 const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () {
+                    // Gửi sự kiện yêu cầu vào chế độ khách
+                    context.read<AuthBloc>().add(SignInAsGuestRequested());
+                  },
+                  child: const Text('Tiếp tục với tư cách khách'),
+                ),
                 TextButton(
                   onPressed: () {
                     Navigator.of(context).push(

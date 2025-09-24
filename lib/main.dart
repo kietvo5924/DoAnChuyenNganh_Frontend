@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:planmate_app/presentation/features/calendar/bloc/calendar_bloc.dart';
 import 'core/services/navigation_service.dart'; // <-- Import file mới
 import 'injection.dart';
 import 'presentation/features/auth/bloc/auth_bloc.dart';
@@ -21,6 +22,7 @@ class MyApp extends StatelessWidget {
       providers: [
         BlocProvider(create: (_) => getIt<AuthBloc>()),
         BlocProvider(create: (_) => getIt<UserBloc>()),
+        BlocProvider(create: (_) => getIt<CalendarBloc>()),
       ],
       child: MaterialApp(
         title: 'MySchedule App',

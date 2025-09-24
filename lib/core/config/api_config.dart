@@ -8,7 +8,4 @@ class ApiConfig {
   // Endpoints cho Authentication
   static const String signInEndpoint = '/auth/signin';
   static const String signUpEndpoint = '/auth/signup';
-
-  // Các endpoints khác có thể thêm ở đây...
-  // static const String tasksEndpoint = '/tasks';
 }

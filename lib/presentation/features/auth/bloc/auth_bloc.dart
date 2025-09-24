@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:planmate_app/core/services/navigation_service.dart';
 import 'package:planmate_app/presentation/features/auth/pages/signin_page.dart';
+import 'package:planmate_app/presentation/features/home/pages/home_page.dart';
 import '../../../../domain/auth/usecases/sign_in.dart';
 import '../../../../domain/auth/usecases/sign_up.dart';
 import '../../../../domain/auth/usecases/sign_out.dart';
@@ -31,7 +32,13 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       result.fold(
         (failure) =>
             emit(AuthFailure(message: 'Email hoặc mật khẩu không đúng.')),
-        (_) => emit(AuthSignInSuccess()),
+        (_) {
+          emit(AuthSignInSuccess());
+          NavigationService.navigatorKey.currentState?.pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const HomePage()),
+            (route) => false,
+          );
+        },
       );
     });
 
@@ -59,6 +66,22 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
       NavigationService.navigatorKey.currentState?.pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const SignInPage()),
+        (route) => false,
+      );
+    });
+
+    // Khi người dùng khách muốn đăng nhập
+    on<GuestWantsToLogin>((event, emit) {
+      NavigationService.navigatorKey.currentState?.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const SignInPage()),
+        (route) => false,
+      );
+    });
+
+    on<SignInAsGuestRequested>((event, emit) {
+      emit(AuthGuestSuccess());
+      NavigationService.navigatorKey.currentState?.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomePage()),
         (route) => false,
       );
     });
