@@ -70,5 +70,9 @@ class TagBloc extends Bloc<TagEvent, TagState> {
       emit(const TagOperationSuccess(message: 'Đã xóa nhãn!'));
       add(FetchTags());
     });
+
+    on<ResetTags>((event, emit) {
+      emit(TagInitial()); // NEW: clear in‑memory state after sign out
+    });
   }
 }

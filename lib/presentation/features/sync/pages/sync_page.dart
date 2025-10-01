@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:planmate_app/presentation/features/tag/bloc/tag_event.dart';
+import 'package:sqflite/sqflite.dart';
+import '../../../../core/services/database_service.dart';
+import '../../../../injection.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_event.dart';
 import '../../home/pages/home_page.dart';
+import '../../tag/bloc/tag_bloc.dart';
 import '../bloc/sync_bloc.dart';
 import '../bloc/sync_event.dart';
 import '../bloc/sync_state.dart';
@@ -18,7 +23,41 @@ class _SyncPageState extends State<SyncPage> {
   @override
   void initState() {
     super.initState();
-    context.read<SyncBloc>().add(StartInitialSync());
+    _startSmartSync();
+  }
+
+  Future<void> _startSmartSync() async {
+    final db = await getIt<DatabaseService>().database;
+    final int negCalendars =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM calendars WHERE id < 0 OR is_synced = 0',
+          ),
+        ) ??
+        0;
+    final int negTags =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM tags WHERE id < 0 OR is_synced = 0',
+          ),
+        ) ??
+        0;
+    final int negTasks =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM tasks WHERE id < 0 OR is_synced = 0',
+          ),
+        ) ??
+        0;
+    final int queue =
+        Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM sync_queue'),
+        ) ??
+        0;
+    final bool needMerge = (negCalendars + negTags + negTasks + queue) > 0;
+    if (mounted) {
+      context.read<SyncBloc>().add(StartInitialSync(mergeGuest: needMerge));
+    }
   }
 
   @override
@@ -27,6 +66,11 @@ class _SyncPageState extends State<SyncPage> {
       body: BlocListener<SyncBloc, SyncState>(
         listener: (context, state) {
           if (state is SyncSuccess) {
+            // NEW: nạp lại tags ngay sau khi sync xong
+            if (mounted) {
+              // forceRemote để chắc chắn gọi remote khi token đã có
+              context.read<TagBloc>().add(const FetchTags(forceRemote: true));
+            }
             Navigator.of(context).pushAndRemoveUntil(
               MaterialPageRoute(builder: (_) => const HomePage()),
               (route) => false,

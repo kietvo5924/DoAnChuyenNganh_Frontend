@@ -24,6 +24,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
   }
 
   void _fetchAllTasks() {
+    // Nay dùng GetAllLocalTasks (đã sửa trong AllTasksBloc) -> tránh mất task sau khi sửa calendar
     context.read<AllTasksBloc>().add(FetchAllTasks());
   }
 

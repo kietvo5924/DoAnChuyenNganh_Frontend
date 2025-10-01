@@ -1,7 +1,9 @@
 import 'package:sqflite/sqflite.dart';
+import 'dart:convert';
 import '../../../core/services/database_service.dart';
 import '../../tag/models/tag_model.dart';
 import '../models/task_model.dart';
+import '../../../domain/tag/entities/tag_entity.dart'; // NEW for fallback
 
 abstract class TaskLocalDataSource {
   Future<List<TaskModel>> getAllTasks();
@@ -18,6 +20,51 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
   final String _taskTagTable = 'task_tags_local';
 
   TaskLocalDataSourceImpl({required this.dbService});
+
+  // REPLACE old _ensureRawTagIdsColumn bằng version mới hỗ trợ thêm raw_tag_meta
+  Future<void> _ensureTagMetaColumns(DatabaseExecutor db) async {
+    try {
+      final cols = await db.rawQuery("PRAGMA table_info(tasks)");
+      final hasIds = cols.any((c) => c['name'] == 'raw_tag_ids');
+      final hasMeta = cols.any((c) => c['name'] == 'raw_tag_meta');
+      if (!hasIds) {
+        await db.execute("ALTER TABLE tasks ADD COLUMN raw_tag_ids TEXT");
+      }
+      if (!hasMeta) {
+        await db.execute("ALTER TABLE tasks ADD COLUMN raw_tag_meta TEXT");
+      }
+    } catch (_) {}
+  }
+
+  // NEW: Rebuild mapping từ raw_tag_ids nếu mất
+  Future<int> _rebuildMappingsFromRawTagIds(Transaction txn, int taskId) async {
+    try {
+      final row = await txn.query(
+        _taskTable,
+        columns: ['raw_tag_ids'],
+        where: 'id = ?',
+        whereArgs: [taskId],
+        limit: 1,
+      );
+      if (row.isEmpty) return 0;
+      final raw = row.first['raw_tag_ids'];
+      if (raw == null) return 0;
+      final List<dynamic> list = jsonDecode(raw as String);
+      int inserted = 0;
+      for (final v in list) {
+        if (v is int) {
+          await txn.insert(_taskTagTable, {
+            'task_id': taskId,
+            'tag_id': v,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+          inserted++;
+        }
+      }
+      return inserted;
+    } catch (_) {
+      return 0;
+    }
+  }
 
   @override
   Future<List<TaskModel>> getAllTasks() async {
@@ -37,7 +84,7 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
     return _mapsToTasksWithTags(taskMaps, db);
   }
 
-  // Hàm helper để tránh lặp code lấy tag
+  // CHANGED: fallback nếu không có mapping
   Future<List<TaskModel>> _mapsToTasksWithTags(
     List<Map<String, dynamic>> taskMaps,
     Database db,
@@ -48,7 +95,47 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
         'SELECT T.* FROM tags T INNER JOIN task_tags_local TT ON T.id = TT.tag_id WHERE TT.task_id = ?',
         [taskMap['id']],
       );
-      final tags = tagMaps.map((tagMap) => TagModel.fromDb(tagMap)).toSet();
+
+      Set<TagEntity> tags;
+      if (tagMaps.isNotEmpty) {
+        tags = tagMaps.map((t) => TagModel.fromDb(t)).toSet();
+      } else {
+        // Fallback dùng raw_tag_meta trước, nếu null dùng raw_tag_ids
+        tags = {};
+        try {
+          if (taskMap['raw_tag_meta'] != null) {
+            final metaList = jsonDecode(taskMap['raw_tag_meta']);
+            if (metaList is List) {
+              for (final m in metaList) {
+                if (m is Map && m['id'] is int) {
+                  tags.add(
+                    TagEntity(
+                      id: m['id'] as int,
+                      name: (m['name'] as String?) ?? '',
+                      color: m['color'] as String?,
+                    ),
+                  );
+                }
+              }
+            }
+          } else if (taskMap['raw_tag_ids'] != null) {
+            final idList = jsonDecode(taskMap['raw_tag_ids']);
+            if (idList is List) {
+              for (final v in idList) {
+                if (v is int) {
+                  tags.add(TagEntity(id: v, name: '', color: null));
+                }
+              }
+            }
+          }
+          if (tags.isNotEmpty) {
+            // removed debug print
+          }
+        } catch (e) {
+          print('[TaskLocal][FALLBACK][ERR] task_id=${taskMap['id']} $e');
+        }
+      }
+
       tasks.add(TaskModel.fromDb(taskMap, tags));
     }
     return tasks;
@@ -58,24 +145,125 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
   Future<void> cacheTasks(List<TaskModel> tasks) async {
     final db = await dbService.database;
     await db.transaction((txn) async {
-      txn.delete(_taskTable);
-      txn.delete(_taskTagTable);
+      await txn.execute('PRAGMA foreign_keys = ON');
+      await _ensureTagMetaColumns(
+        txn,
+      ); // CHANGED (thay cho _ensureRawTagIdsColumn)
 
+      // Thu thập tag
+      final Map<int, TagModel> allTags = {};
       for (final task in tasks) {
-        // Chuyển đổi task sang map và đảm bảo is_synced = 1
-        var taskMap = task.toDbMap();
-        taskMap['is_synced'] = 1;
-
-        txn.insert(
-          _taskTable,
-          taskMap,
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
         for (final tag in task.tags) {
-          txn.insert(_taskTagTable, {'task_id': task.id, 'tag_id': tag.id});
+          allTags.putIfAbsent(tag.id, () {
+            if (tag is TagModel) return tag;
+            return TagModel(id: tag.id, name: tag.name, color: tag.color);
+          });
         }
       }
+      for (final tag in allTags.values) {
+        await txn.insert('tags', {
+          'id': tag.id,
+          'name': tag.name,
+          'color': tag.color,
+          'is_synced': 1,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+
+      int totalMappingInserted = 0;
+
+      for (final task in tasks) {
+        try {
+          final rawIds = task.tags.map((e) => e.id).toList();
+          final rawMeta = task.tags
+              .map(
+                (e) => {
+                  'id': e.id,
+                  'name': (e is TagModel) ? e.name : e.name,
+                  'color': (e is TagModel) ? e.color : e.color,
+                },
+              )
+              .toList();
+
+          final taskMap = task.toDbMap()
+            ..['is_synced'] = 1
+            ..['raw_tag_ids'] =
+                jsonEncode(rawIds) // CHANGED
+            ..['raw_tag_meta'] = jsonEncode(rawMeta); // NEW
+
+          await txn.insert(
+            _taskTable,
+            taskMap,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+
+          final deleted = await txn.delete(
+            _taskTagTable,
+            where: 'task_id = ?',
+            whereArgs: [task.id],
+          );
+          if (deleted > 0) {
+            // silent
+          }
+
+          // Insert mapping (OR REPLACE để chắc chắn)
+          int localInserted = 0;
+          for (final tag in task.tags) {
+            try {
+              await txn.insert(_taskTagTable, {
+                'task_id': task.id,
+                'tag_id': tag.id,
+              }, conflictAlgorithm: ConflictAlgorithm.replace);
+              localInserted++;
+            } catch (e) {
+              print(
+                '[TaskLocal][MAP-ERR] task=${task.id} tag=${tag.id} err=$e',
+              );
+            }
+          }
+          totalMappingInserted += localInserted;
+
+          // Verify
+          final count =
+              Sqflite.firstIntValue(
+                await txn.rawQuery(
+                  'SELECT COUNT(*) FROM $_taskTagTable WHERE task_id = ?',
+                  [task.id],
+                ),
+              ) ??
+              0;
+
+          if (count == 0 && task.tags.isNotEmpty) {
+            print(
+              '[TaskLocal][WARN] Mapping still empty after insert for task=${task.id}, attempting rebuild from raw_tag_ids',
+            );
+            final rebuilt = await _rebuildMappingsFromRawTagIds(txn, task.id);
+            totalMappingInserted += rebuilt;
+            if (rebuilt == 0) {
+              print(
+                '[TaskLocal][FATAL] Cannot create mappings for task=${task.id} (tag ids=${task.tags.map((e) => e.id).toList()})',
+              );
+            }
+          } else {
+            print(
+              '[TaskLocal] task=${task.id} mappingCount=$count (expected=${task.tags.length})',
+            );
+          }
+        } catch (e) {
+          print('[TaskLocal][ERROR] cache task id=${task.id}: $e');
+        }
+      }
+
+      print(
+        '[TaskLocal] Upserted ${tasks.length} task(s); total tagMappings=$totalMappingInserted',
+      );
+      await _logCurrentMappings(txn);
     });
+  }
+
+  // NEW: hàm hỗ trợ debug tổng quan sau khi cache
+  Future<void> _logCurrentMappings(Transaction txn) async {
+    // make no-op (silent)
+    return;
   }
 
   // -- PHẦN BỔ SUNG --
@@ -84,21 +272,27 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
   Future<void> saveTask(TaskModel task, {required bool isSynced}) async {
     final db = await dbService.database;
     await db.transaction((txn) async {
-      var taskMap = task.toDbMap();
-      taskMap['is_synced'] = isSynced ? 1 : 0; // Gán cờ đồng bộ
-
-      // Dùng replace để xử lý cả trường hợp Tạo mới và Cập nhật
-      txn.insert(
+      final taskMap = task.toDbMap()..['is_synced'] = isSynced ? 1 : 0;
+      await txn.insert(
         _taskTable,
         taskMap,
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
-
-      // Xóa các liên kết tag cũ và cập nhật lại
-      txn.delete(_taskTagTable, where: 'task_id = ?', whereArgs: [task.id]);
-      for (final tag in task.tags) {
-        txn.insert(_taskTagTable, {'task_id': task.id, 'tag_id': tag.id});
+      final deleted = await txn.delete(
+        _taskTagTable,
+        where: 'task_id = ?',
+        whereArgs: [task.id],
+      );
+      if (deleted > 0) {
+        // silent
       }
+      for (final tag in task.tags) {
+        await txn.insert(_taskTagTable, {
+          'task_id': task.id,
+          'tag_id': tag.id,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+      // removed print
     });
   }
 

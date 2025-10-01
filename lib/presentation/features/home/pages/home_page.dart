@@ -17,7 +17,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    // Trigger load of calendars + default calendar tasks
+    // Sẽ fallback sang toàn bộ tasks nếu mất calendar default
     context.read<HomeBloc>().add(FetchHomeData());
   }
 

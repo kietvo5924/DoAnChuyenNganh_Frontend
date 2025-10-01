@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:convert'; // NEW
 import '../../../domain/tag/entities/tag_entity.dart';
 import '../../../domain/task/entities/task_entity.dart';
 import '../../tag/models/tag_model.dart';
@@ -64,6 +65,71 @@ class TaskModel extends TaskEntity {
   }
 
   factory TaskModel.fromJson(Map<String, dynamic> json) {
+    // NEW: build tags from multiple possible formats
+    Set<TagEntity> parsedTags = {};
+    final rawTags = json['tags'];
+    // Case 1: 'tags' là list object
+    if (rawTags is List && rawTags.isNotEmpty) {
+      parsedTags = rawTags
+          .map((tagJson) {
+            if (tagJson is Map) {
+              final map = Map<String, dynamic>.from(tagJson as Map);
+              // chấp nhận cả key 'tagId'
+              final id = map['id'] ?? map['tagId'];
+              if (id is int) {
+                return TagModel.fromJson({
+                  'id': id,
+                  'name': map['name'] ?? '',
+                  'color': map['color'],
+                });
+              }
+            } else if (tagJson is int) {
+              return TagEntity(id: tagJson, name: '');
+            }
+            return null;
+          })
+          .whereType<TagEntity>()
+          .toSet();
+    } else {
+      // Case 2: 'tagIds' đủ kiểu
+      final rawTagIds = json['tagIds'];
+      List<int> ids = [];
+      if (rawTagIds is List) {
+        ids = rawTagIds.where((e) => e is int).cast<int>().toList();
+      } else if (rawTagIds is String) {
+        final s = rawTagIds.trim();
+        if (s.startsWith('[') && s.endsWith(']')) {
+          // JSON array string
+          try {
+            final decoded = jsonDecode(s);
+            if (decoded is List) {
+              ids = decoded.where((e) => e is int).cast<int>().toList();
+            }
+          } catch (_) {}
+        }
+        if (ids.isEmpty && s.contains(RegExp(r'[;,]'))) {
+          ids = s
+              .split(RegExp(r'[;,]'))
+              .map((e) => int.tryParse(e.trim()))
+              .whereType<int>()
+              .toList();
+        }
+        if (ids.isEmpty && RegExp(r'^\d+$').hasMatch(s)) {
+          // Chuỗi toàn số liền nhau, thử tách 2 ký tự
+          if (s.length % 2 == 0) {
+            for (var i = 0; i < s.length; i += 2) {
+              final part = s.substring(i, i + 2);
+              final v = int.tryParse(part);
+              if (v != null) ids.add(v);
+            }
+          }
+        }
+      }
+      if (ids.isNotEmpty) {
+        parsedTags = ids.map((e) => TagEntity(id: e, name: '')).toSet();
+      }
+    }
+
     return TaskModel(
       id: json['id'],
       title: json['title'],
@@ -92,10 +158,7 @@ class TaskModel extends TaskEntity {
           ? DateTime.parse(json['repeatEnd'])
           : null,
       exceptions: json['exceptions'],
-      // Parse danh sách các nhãn
-      tags: (json['tags'] as List<dynamic>? ?? [])
-          .map((tagJson) => TagModel.fromJson(tagJson))
-          .toSet(),
+      tags: parsedTags, // CHANGED
     );
   }
 

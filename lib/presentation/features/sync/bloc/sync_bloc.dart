@@ -4,6 +4,10 @@ import '../../../../domain/tag/usecases/sync_remote_tags.dart';
 import '../../../../domain/task/usecases/sync_all_remote_tasks.dart';
 import '../../../../domain/user/usecases/sync_user_profile.dart';
 import '../../../../domain/user/usecases/get_cached_user.dart';
+import '../../../../domain/sync/usecases/merge_guest_data.dart'; // NEW
+import '../../../../domain/sync/usecases/process_sync_queue.dart';
+import '../../../../domain/sync/usecases/upload_guest_data.dart'; // NEW
+import '../../../../injection.dart';
 import 'sync_event.dart';
 import 'sync_state.dart';
 
@@ -13,6 +17,9 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
   final SyncRemoteCalendars _syncRemoteCalendars;
   final SyncRemoteTags _syncRemoteTags;
   final SyncAllRemoteTasks _syncAllRemoteTasks;
+  final MergeGuestData _mergeGuestData; // NEW
+  final ProcessSyncQueue _processSyncQueue; // NEW
+  final UploadGuestData _uploadGuestData; // NEW
 
   SyncBloc({
     required GetCachedUser getCachedUser,
@@ -20,123 +27,104 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     required SyncRemoteCalendars syncRemoteCalendars,
     required SyncRemoteTags syncRemoteTags,
     required SyncAllRemoteTasks syncAllRemoteTasks,
+    required MergeGuestData mergeGuestData, // NEW
+    required ProcessSyncQueue processSyncQueue, // NEW
+    required UploadGuestData uploadGuestData, // NEW
   }) : _getCachedUser = getCachedUser,
        _syncUserProfile = syncUserProfile,
        _syncRemoteCalendars = syncRemoteCalendars,
        _syncRemoteTags = syncRemoteTags,
        _syncAllRemoteTasks = syncAllRemoteTasks,
+       _mergeGuestData = mergeGuestData, // NEW
+       _processSyncQueue = processSyncQueue, // NEW
+       _uploadGuestData = uploadGuestData, // NEW
        super(SyncInitial()) {
     on<StartInitialSync>((event, emit) async {
       try {
-        print('>>> SYNC: START');
         emit(
           const SyncInProgress(progress: 0.0, message: 'Bắt đầu đồng bộ...'),
         );
-
-        // 1. User Profile (cache-first, fetch remote nếu chưa có)
-        print('>>> SYNC STEP 1: User Profile (cache-first, fetch-if-missing)');
-        emit(
-          const SyncInProgress(
-            progress: 0.1,
-            message: 'Đang tải thông tin người dùng...',
-          ),
-        );
-
+        if (event.mergeGuest) {
+          emit(
+            const SyncInProgress(
+              progress: 0.05,
+              message: 'Đang chuẩn bị dữ liệu...',
+            ),
+          );
+          await _mergeGuestData();
+          await _uploadGuestData();
+        }
+        emit(const SyncInProgress(progress: 0.15, message: 'Người dùng...'));
         bool hasCachedUser = false;
         final cachedResult = await _getCachedUser();
         await cachedResult.fold(
-          (f) async {
-            print('>>> SYNC STEP 1: Cache read failure -> sẽ thử remote');
-          },
+          (f) async => print('>>> STEP1: cache read failure'),
           (user) async {
-            if (user != null) {
+            if (user != null && !event.forceUserRemote) {
               hasCachedUser = true;
-              print(
-                '>>> SYNC STEP 1: FOUND cached user id=${user.id} email=${user.email} -> skip remote',
-              );
-            } else {
-              print('>>> SYNC STEP 1: Cache EMPTY -> need remote fetch');
+              print('>>> STEP1: cache hit -> skip remote');
             }
           },
         );
-
-        if (!hasCachedUser) {
-          final remoteResult =
-              await _syncUserProfile(); // forceRemote=false đủ vì cache rỗng
+        if (!hasCachedUser || event.forceUserRemote) {
+          final remoteResult = await _syncUserProfile();
           if (remoteResult.isLeft()) {
-            print('>>> SYNC STEP 1 FAILED (remote fetch user profile)');
             emit(const SyncFailure(message: 'Lỗi tải thông tin người dùng.'));
             return;
-          } else {
-            print('>>> SYNC STEP 1 DONE (remote fetched & cached)');
           }
-        } else {
-          print('>>> SYNC STEP 1 DONE (cache only)');
         }
 
-        // 2. Calendars
-        print('>>> SYNC STEP 2: Calendars');
         emit(
           const SyncInProgress(
-            progress: 0.3,
+            progress: 0.30,
             message: 'Đang tải các bộ lịch...',
           ),
         );
-        var result = await _syncRemoteCalendars();
-        if (result.isLeft()) {
-          result.fold(
-            (f) => print('>>> SYNC STEP 2 FAILURE TYPE: ${f.runtimeType}'),
-            (_) {},
-          );
+        final calRes = await _syncRemoteCalendars();
+        if (calRes.isLeft()) {
           emit(const SyncFailure(message: 'Lỗi tải các bộ lịch.'));
           return;
         }
-        print('>>> SYNC STEP 2 DONE');
-
-        // 3. Tags
-        print('>>> SYNC STEP 3: Tags');
         emit(
-          const SyncInProgress(progress: 0.5, message: 'Đang tải các nhãn...'),
+          const SyncInProgress(progress: 0.45, message: 'Đang tải các nhãn...'),
         );
-        result = await _syncRemoteTags();
-        if (result.isLeft()) {
-          result.fold(
-            (f) => print('>>> SYNC STEP 3 FAILURE TYPE: ${f.runtimeType}'),
-            (_) {},
-          );
-          print('>>> GỢI Ý: kiểm tra TagRemoteDataSource headers / cache.');
+        final tagRes = await _syncRemoteTags();
+        if (tagRes.isLeft()) {
           emit(const SyncFailure(message: 'Lỗi tải các nhãn.'));
           return;
         }
-        print('>>> SYNC STEP 3 DONE');
 
-        // 4. Tasks
-        print('>>> SYNC STEP 4: Tasks');
         emit(
           const SyncInProgress(progress: 0.7, message: 'Đang tải công việc...'),
         );
-        result = await _syncAllRemoteTasks();
-        if (result.isLeft()) {
-          bool isNetworkFailure = false;
-          result.fold((f) {
-            print('>>> SYNC STEP 4 FAILURE TYPE: ${f.runtimeType}');
-            isNetworkFailure = f.runtimeType.toString() == 'NetworkFailure';
+        final taskRes = await _syncAllRemoteTasks();
+        if (taskRes.isLeft()) {
+          bool fatal = true;
+          taskRes.fold((f) {
+            if (f.runtimeType.toString() == 'NetworkFailure') fatal = false;
           }, (_) {});
-          if (!isNetworkFailure) {
+          if (fatal) {
             emit(const SyncFailure(message: 'Lỗi tải các công việc.'));
             return;
-          } else {
-            print('>>> SYNC STEP 4: NetworkFailure ignored (offline skip)');
           }
         }
-        print('>>> SYNC STEP 4 DONE');
+
+        if (!event.mergeGuest) {
+          emit(
+            const SyncInProgress(
+              progress: 0.85,
+              message: 'Đồng bộ thay đổi offline...',
+            ),
+          );
+          await _processSyncQueue();
+        } else {
+          await _syncAllRemoteTasks();
+        }
 
         emit(const SyncInProgress(progress: 1.0, message: 'Hoàn tất!'));
-        await Future.delayed(const Duration(milliseconds: 300));
-        print('>>> SYNC: SUCCESS');
+        await Future.delayed(const Duration(milliseconds: 200));
         emit(SyncSuccess());
-      } catch (e) {
-        print('>>> SYNC: UNCAUGHT ERROR $e');
+      } catch (_) {
         emit(
           const SyncFailure(
             message: 'Đồng bộ dữ liệu thất bại. Vui lòng thử lại.',

@@ -26,10 +26,8 @@ class AuthRepositoryImpl implements AuthRepository {
         password: password,
       );
       await sharedPreferences.setString(kAuthTokenKey, token);
-      print('>>> SIGN IN SUCCESS - token saved (${token.substring(0, 12)}...)');
       return Right(unit);
-    } catch (e) {
-      print('>>> SIGN IN FAILED: $e');
+    } catch (_) {
       return Left(ServerFailure());
     }
   }
@@ -46,10 +44,8 @@ class AuthRepositoryImpl implements AuthRepository {
         email: email,
         password: password,
       );
-      print('>>> SIGN UP SUCCESS: $message');
       return right(message);
-    } catch (e) {
-      print('>>> SIGN UP FAILED: $e');
+    } catch (_) {
       return left(ServerFailure());
     }
   }

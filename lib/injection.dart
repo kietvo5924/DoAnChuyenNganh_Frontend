@@ -38,6 +38,8 @@ import 'domain/calendar/usecases/save_calendar.dart';
 import 'domain/calendar/usecases/set_default_calendar.dart';
 import 'domain/calendar/usecases/sync_remote_calendars.dart';
 import 'domain/sync/usecases/process_sync_queue.dart';
+import 'domain/sync/usecases/merge_guest_data.dart'; // NEW
+import 'domain/sync/usecases/upload_guest_data.dart'; // NEW
 import 'domain/tag/repositories/tag_repository.dart';
 import 'domain/tag/usecases/delete_tag.dart';
 import 'domain/tag/usecases/get_local_tags.dart';
@@ -89,11 +91,6 @@ Future<void> configureDependencies() async {
   );
   getIt.registerLazySingleton(() => Connectivity());
   getIt.registerLazySingleton<DatabaseService>(() => DatabaseService.instance);
-
-  // Sau khi đăng ký Connectivity, lắng nghe thay đổi để debug
-  getIt<Connectivity>().onConnectivityChanged.listen((result) {
-    print('>>> CONNECTIVITY CHANGED STREAM: $result');
-  });
 
   // == Core ==
   getIt.registerLazySingleton<NetworkInfo>(() => NetworkInfoImpl(getIt()));
@@ -149,6 +146,8 @@ Future<void> configureDependencies() async {
       remoteDataSource: getIt(),
       localDataSource: getIt(),
       networkInfo: getIt(),
+      syncQueueLocalDataSource: getIt(),
+      prefs: getIt(), // NEW
     ),
   );
   getIt.registerLazySingleton<TagRepository>(
@@ -156,6 +155,8 @@ Future<void> configureDependencies() async {
       remoteDataSource: getIt(),
       localDataSource: getIt(),
       networkInfo: getIt(),
+      syncQueueLocalDataSource: getIt(),
+      prefs: getIt(), // NEW
     ),
   );
   getIt.registerLazySingleton<TaskRepository>(
@@ -165,6 +166,7 @@ Future<void> configureDependencies() async {
       calendarRepository: getIt(),
       networkInfo: getIt(),
       syncQueueLocalDataSource: getIt(),
+      prefs: getIt(), // NEW
     ),
   );
 
@@ -207,8 +209,22 @@ Future<void> configureDependencies() async {
     () => ProcessSyncQueue(
       localDataSource: getIt(),
       taskRemoteDataSource: getIt(),
+      calendarRemoteDataSource: getIt(),
+      calendarLocalDataSource: getIt(),
+      tagRemoteDataSource: getIt(),
+      tagLocalDataSource: getIt(),
     ),
   );
+  getIt.registerLazySingleton(
+    () => MergeGuestData(getIt()),
+  ); // NEW (missing before)
+  getIt.registerLazySingleton(
+    () => UploadGuestData(
+      dbService: getIt(),
+      queueDs: getIt(),
+      processSyncQueue: getIt(),
+    ),
+  ); // NEW
 
   // == BLoCs ==
   getIt.registerFactory(
@@ -233,6 +249,7 @@ Future<void> configureDependencies() async {
       saveCalendar: getIt(),
       deleteCalendar: getIt(),
       setDefaultCalendar: getIt(),
+      syncAllRemoteTasks: getIt(), // NEW
     ),
   );
   getIt.registerFactory(
@@ -256,16 +273,19 @@ Future<void> configureDependencies() async {
   getIt.registerFactory(
     () => AllTasksBloc(
       getLocalCalendars: getIt(),
-      getLocalTasksInCalendar: getIt(),
+      getAllLocalTasks: getIt(), // CHANGED: dùng GetAllLocalTasks
     ),
   );
   getIt.registerFactory(
     () => SyncBloc(
-      getCachedUser: getIt(), // NEW
+      getCachedUser: getIt(),
       syncUserProfile: getIt(),
       syncRemoteCalendars: getIt(),
       syncRemoteTags: getIt(),
       syncAllRemoteTasks: getIt(),
+      mergeGuestData: getIt(), // now registered
+      processSyncQueue: getIt(),
+      uploadGuestData: getIt(),
     ),
   );
 }

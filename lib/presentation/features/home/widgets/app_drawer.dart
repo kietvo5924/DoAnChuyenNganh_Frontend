@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:planmate_app/presentation/features/tag/bloc/tag_bloc.dart';
+import 'package:planmate_app/presentation/features/tag/bloc/tag_event.dart';
 import 'package:planmate_app/presentation/features/tag/pages/tag_management_page.dart';
 import 'package:planmate_app/presentation/features/task/pages/all_tasks_page.dart';
 import '../../auth/bloc/auth_bloc.dart';
@@ -164,9 +166,25 @@ Future<void> _handleSignOutFlow(BuildContext context) async {
 
   final prefs = getIt<SharedPreferences>();
 
+  Future<void> _purgeTagsOnly() async {
+    // NEW
+    try {
+      await db.delete('task_tags_local');
+      await db.delete('tags');
+      print('[SignOutFlow] Purged tags tables manually');
+    } catch (e) {
+      print('[SignOutFlow] Purge tags failed: $e');
+    }
+  }
+
   Future<void> forceNavigateToLogin({required bool cleared}) async {
     // Bảo đảm token bị xóa
     await prefs.remove(kAuthTokenKey);
+    // Nếu chưa clear toàn bộ DB thì vẫn chủ động xóa riêng Tag (tránh giữ lại cho account mới)
+    if (!cleared) {
+      // NEW
+      await _purgeTagsOnly();
+    }
     context.read<AuthBloc>().add(SignOutRequested());
     if (nav != null) {
       nav.pushAndRemoveUntil(
@@ -174,6 +192,12 @@ Future<void> _handleSignOutFlow(BuildContext context) async {
         (r) => false,
       );
     }
+    // NEW: reset TagBloc state so guest không thấy tag cũ
+    if (context.mounted) {
+      context.read<TagBloc>().add(ResetTags());
+    }
+    // (Có thể làm tương tự cho các bloc khác nếu cần)
+
     if (NavigationService.navigatorKey.currentContext != null) {
       ScaffoldMessenger.of(
         NavigationService.navigatorKey.currentContext!,

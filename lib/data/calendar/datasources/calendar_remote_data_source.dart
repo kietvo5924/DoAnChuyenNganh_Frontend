@@ -41,9 +41,15 @@ class CalendarRemoteDataSourceImpl implements CalendarRemoteDataSource {
     String name,
     String? description,
   ) async {
+    // Gửi luôn isDefault để server không vô tình reset
     final response = await dio.put(
       '${ApiConfig.baseUrl}/calendars/$id',
-      data: {'name': name, 'description': description},
+      data: {
+        'name': name,
+        'description': description,
+        // Nếu backend bỏ qua field này cũng không sao, nhưng giúp bảo toàn trạng thái
+        'isDefault': false, // sẽ được xử lý lại bằng set-default endpoint khác
+      },
     );
     return CalendarModel.fromJson(response.data);
   }

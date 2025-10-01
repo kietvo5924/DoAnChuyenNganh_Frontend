@@ -23,3 +23,5 @@ class DeleteTagSubmitted extends TagEvent {
   final int tagId;
   const DeleteTagSubmitted({required this.tagId});
 }
+
+class ResetTags extends TagEvent {}

@@ -4,6 +4,7 @@ import '../../../../domain/calendar/usecases/sync_remote_calendars.dart';
 import '../../../../domain/calendar/usecases/save_calendar.dart';
 import '../../../../domain/calendar/usecases/delete_calendar.dart';
 import '../../../../domain/calendar/usecases/set_default_calendar.dart';
+import '../../../../domain/task/usecases/sync_all_remote_tasks.dart'; // NEW
 import 'calendar_event.dart';
 import 'calendar_state.dart';
 
@@ -13,6 +14,7 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
   final SaveCalendar _saveCalendar;
   final DeleteCalendar _deleteCalendar;
   final SetDefaultCalendar _setDefaultCalendar;
+  final SyncAllRemoteTasks _syncAllRemoteTasks; // NEW
 
   CalendarBloc({
     required GetLocalCalendars getLocalCalendars,
@@ -20,11 +22,13 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
     required SaveCalendar saveCalendar,
     required DeleteCalendar deleteCalendar,
     required SetDefaultCalendar setDefaultCalendar,
+    required SyncAllRemoteTasks syncAllRemoteTasks, // NEW
   }) : _getLocalCalendars = getLocalCalendars,
        _syncRemoteCalendars = syncRemoteCalendars,
        _saveCalendar = saveCalendar,
        _deleteCalendar = deleteCalendar,
        _setDefaultCalendar = setDefaultCalendar,
+       _syncAllRemoteTasks = syncAllRemoteTasks, // NEW
        super(CalendarInitial()) {
     on<FetchCalendars>((event, emit) async {
       // Nếu đã có dữ liệu và không ép làm mới -> chỉ reload local nhanh rồi thoát
@@ -77,10 +81,12 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
     on<SaveCalendarSubmitted>((event, emit) async {
       emit(CalendarOperationInProgress());
       final result = await _saveCalendar(event.calendar);
-      result.fold(
-        (f) => emit(const CalendarError(message: 'Lưu lịch thất bại')),
-        (_) {
+      await result.fold(
+        (f) async => emit(const CalendarError(message: 'Lưu lịch thất bại')),
+        (_) async {
           add(FetchCalendars());
+          // Đồng bộ lại tasks ngay (nếu có mạng sẽ kéo remote, nếu không sẽ skip an toàn)
+          await _syncAllRemoteTasks(); // NEW
           emit(const CalendarOperationSuccess(message: 'Đã lưu lịch'));
         },
       );
@@ -89,10 +95,11 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
     on<DeleteCalendarSubmitted>((event, emit) async {
       emit(CalendarOperationInProgress());
       final result = await _deleteCalendar(event.calendarId);
-      result.fold(
-        (f) => emit(const CalendarError(message: 'Xóa lịch thất bại')),
-        (_) {
+      await result.fold(
+        (f) async => emit(const CalendarError(message: 'Xóa lịch thất bại')),
+        (_) async {
           add(FetchCalendars());
+          await _syncAllRemoteTasks(); // NEW
           emit(const CalendarOperationSuccess(message: 'Đã xóa lịch'));
         },
       );
@@ -101,10 +108,12 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
     on<SetDefaultCalendarSubmitted>((event, emit) async {
       emit(CalendarOperationInProgress());
       final result = await _setDefaultCalendar(event.calendarId);
-      result.fold(
-        (f) => emit(const CalendarError(message: 'Đặt mặc định thất bại')),
-        (_) {
+      await result.fold(
+        (f) async =>
+            emit(const CalendarError(message: 'Đặt mặc định thất bại')),
+        (_) async {
           add(FetchCalendars());
+          await _syncAllRemoteTasks(); // NEW
           emit(const CalendarOperationSuccess(message: 'Đã đặt làm mặc định'));
         },
       );

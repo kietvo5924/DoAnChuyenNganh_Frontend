@@ -1,9 +1,12 @@
+import 'package:sqflite/sqflite.dart';
 import '../../../core/services/database_service.dart';
 import '../models/tag_model.dart';
 
 abstract class TagLocalDataSource {
   Future<List<TagModel>> getAllTags();
   Future<void> cacheTags(List<TagModel> tags);
+  Future<void> saveTag(TagModel tag, {required bool isSynced}); // NEW
+  Future<void> deleteTag(int tagId); // NEW
 }
 
 class TagLocalDataSourceImpl implements TagLocalDataSource {
@@ -22,13 +25,35 @@ class TagLocalDataSourceImpl implements TagLocalDataSource {
   @override
   Future<void> cacheTags(List<TagModel> tags) async {
     final db = await dbService.database;
-    final batch = db.batch();
+    await db.transaction((txn) async {
+      for (final tag in tags) {
+        await txn.insert(_tableName, {
+          'id': tag.id,
+          'name': tag.name,
+          'color': tag.color,
+          'is_synced': 1,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      print(
+        '[TagLocal] Upserted ${tags.length} remote tag(s) (preserve offline unsynced)',
+      );
+    });
+  }
 
-    batch.delete(_tableName); // Xóa dữ liệu cũ
+  @override
+  Future<void> saveTag(TagModel tag, {required bool isSynced}) async {
+    final db = await dbService.database;
+    await db.insert(_tableName, {
+      'id': tag.id,
+      'name': tag.name,
+      'color': tag.color,
+      'is_synced': isSynced ? 1 : 0,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
 
-    for (final tag in tags) {
-      batch.insert(_tableName, tag.toDbMap());
-    }
-    await batch.commit(noResult: true);
+  @override
+  Future<void> deleteTag(int tagId) async {
+    final db = await dbService.database;
+    await db.delete(_tableName, where: 'id = ?', whereArgs: [tagId]);
   }
 }

@@ -4,6 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
 import 'package:planmate_app/data/sync/datasources/sync_queue_local_data_source.dart';
 import 'package:planmate_app/data/sync/models/sync_queue_item_model.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // NEW
+import 'package:planmate_app/data/auth/repositories/auth_repository_impl.dart'; // NEW kAuthTokenKey
 import '../../../core/error/failures.dart';
 import '../../../core/network/network_info.dart';
 import '../../../domain/calendar/repositories/calendar_repository.dart';
@@ -19,6 +21,7 @@ class TaskRepositoryImpl implements TaskRepository {
   final CalendarRepository calendarRepository;
   final NetworkInfo networkInfo;
   final SyncQueueLocalDataSource syncQueueLocalDataSource;
+  final SharedPreferences _prefs; // NEW
 
   TaskRepositoryImpl({
     required this.remoteDataSource,
@@ -26,7 +29,18 @@ class TaskRepositoryImpl implements TaskRepository {
     required this.calendarRepository,
     required this.networkInfo,
     required this.syncQueueLocalDataSource,
-  });
+    required SharedPreferences prefs, // NEW
+  }) : _prefs = prefs; // NEW
+
+  bool _hasToken() {
+    final t = _prefs.getString(kAuthTokenKey);
+    return t != null && t.isNotEmpty;
+  }
+
+  bool _isAuthRedirectOrUnauthorized(DioException e) {
+    final c = e.response?.statusCode;
+    return c == 302 || c == 401 || c == 403;
+  }
 
   @override
   Future<Either<Failure, List<TaskEntity>>> getLocalTasksInCalendar(
@@ -52,34 +66,37 @@ class TaskRepositoryImpl implements TaskRepository {
 
   @override
   Future<Either<Failure, Unit>> syncAllRemoteTasks() async {
+    if (!_hasToken()) {
+      return Right(unit);
+    }
     final connectedFlag = await networkInfo.isConnected;
-    print(
-      '[TaskRepository] connectivityFlag=$connectedFlag -> remote sync attempt',
-    );
     try {
       final calendarsResult = await calendarRepository.getLocalCalendars();
       if (calendarsResult.isLeft()) return Left(CacheFailure());
       final calendars = calendarsResult.getOrElse(() => []);
-      if (calendars.isEmpty) {
-        await localDataSource.cacheTasks([]);
-        print('[TaskRepository] no calendars -> cleared tasks');
+
+      // Bỏ qua nếu không có calendar dương (chưa đồng bộ xong)
+      final positiveCalendars = calendars.where((c) => c.id > 0).toList();
+      if (positiveCalendars.isEmpty) {
         return Right(unit);
       }
+
       final List<TaskModel> allRemote = [];
-      for (final cal in calendars) {
-        final remoteTasks = await remoteDataSource.getAllTasksInCalendar(
-          cal.id,
-        );
-        print(
-          '[TaskRepository] calendar ${cal.id} -> ${remoteTasks.length} tasks',
-        );
-        allRemote.addAll(remoteTasks);
+      for (final cal in positiveCalendars) {
+        try {
+          final remoteTasks = await remoteDataSource.getAllTasksInCalendar(
+            cal.id,
+          );
+          allRemote.addAll(remoteTasks);
+        } on DioException {
+          continue;
+        } catch (_) {
+          continue;
+        }
       }
       await localDataSource.cacheTasks(allRemote);
-      print('[TaskRepository] cached ${allRemote.length} tasks');
       return Right(unit);
     } catch (e) {
-      print('[TaskRepository] error: $e');
       if (e is DioException) {
         final netLike =
             e.type == DioExceptionType.connectionError ||
@@ -88,7 +105,7 @@ class TaskRepositoryImpl implements TaskRepository {
             e.type == DioExceptionType.unknown;
         if (!connectedFlag && netLike) {
           print('[TaskRepository] treat as offline skip (no failure)');
-          return Right(unit); // graceful skip
+          return Right(unit);
         }
       }
       return Left(ServerFailure());
@@ -132,7 +149,11 @@ class TaskRepositoryImpl implements TaskRepository {
     };
     final taskId = (task.id == 0) ? null : task.id;
 
-    if (await networkInfo.isConnected) {
+    final hasToken = _hasToken(); // NEW
+    final isOnline = await networkInfo.isConnected;
+    final onlineAndAuthed = hasToken && isOnline; // NEW
+
+    if (onlineAndAuthed) {
       try {
         await remoteDataSource.saveTask(
           calendarId: task.calendarId,
@@ -141,60 +162,63 @@ class TaskRepositoryImpl implements TaskRepository {
         );
         await syncAllRemoteTasks();
         return Right(unit);
-      } catch (e) {
+      } on DioException catch (e) {
+        if (_isAuthRedirectOrUnauthorized(e)) {
+          // silent fallback
+        } else {
+          return Left(ServerFailure());
+        }
+      } catch (_) {
         return Left(ServerFailure());
       }
-    } else {
-      try {
-        // NEW: generate temp negative id if creating offline
-        int localId = task.id;
-        if (localId == 0) {
-          localId = -DateTime.now().millisecondsSinceEpoch; // temp id
-        }
-        final taskModelToSave = TaskModel(
-          id: localId, // CHANGED
-          title: task.title,
-          description: task.description,
-          tags: task.tags,
-          calendarId: task.calendarId,
-          repeatType: task.repeatType,
-          startTime: task.startTime,
-          endTime: task.endTime,
-          isAllDay: task.isAllDay,
-          repeatStartTime: task.repeatStartTime,
-          repeatEndTime: task.repeatEndTime,
-          timezone: task.timezone,
-          repeatInterval: task.repeatInterval,
-          repeatDays: task.repeatDays,
-          repeatDayOfMonth: task.repeatDayOfMonth,
-          repeatWeekOfMonth: task.repeatWeekOfMonth,
-          repeatDayOfWeek: task.repeatDayOfWeek,
-          repeatStart: task.repeatStart,
-          repeatEnd: task.repeatEnd,
-          exceptions: task.exceptions,
-        );
-        await localDataSource.saveTask(taskModelToSave, isSynced: false);
-
-        // NEW: push UPSERT action with payload
-        final payload = jsonEncode({
-          'calendarId': task.calendarId,
-          // reuse taskData but ensure nulls handled
-          'taskData': taskData,
-        });
-        await syncQueueLocalDataSource.addAction(
-          SyncQueueItemModel(
-            entityType: 'TASK',
-            entityId: localId,
-            action: 'UPSERT',
-            payload: payload,
-          ),
-        );
-
-        return Right(unit);
-      } catch (e) {
-        return Left(CacheFailure());
-      }
     }
+    // OFFLINE hoặc guest fallback
+    // NEW: generate temp negative id if creating offline
+    int localId = task.id;
+    if (localId == 0) {
+      localId = -DateTime.now()
+          .millisecondsSinceEpoch; // temp negative id for offline create
+    }
+    final taskModelToSave = TaskModel(
+      id: localId, // CHANGED
+      title: task.title,
+      description: task.description,
+      tags: task.tags,
+      calendarId: task.calendarId,
+      repeatType: task.repeatType,
+      startTime: task.startTime,
+      endTime: task.endTime,
+      isAllDay: task.isAllDay,
+      repeatStartTime: task.repeatStartTime,
+      repeatEndTime: task.repeatEndTime,
+      timezone: task.timezone,
+      repeatInterval: task.repeatInterval,
+      repeatDays: task.repeatDays,
+      repeatDayOfMonth: task.repeatDayOfMonth,
+      repeatWeekOfMonth: task.repeatWeekOfMonth,
+      repeatDayOfWeek: task.repeatDayOfWeek,
+      repeatStart: task.repeatStart,
+      repeatEnd: task.repeatEnd,
+      exceptions: task.exceptions,
+    );
+    await localDataSource.saveTask(taskModelToSave, isSynced: false);
+
+    // NEW: push UPSERT action with payload
+    final payload = jsonEncode({
+      'calendarId': task.calendarId,
+      // reuse taskData but ensure nulls handled
+      'taskData': taskData,
+    });
+    await syncQueueLocalDataSource.addAction(
+      SyncQueueItemModel(
+        entityType: 'TASK',
+        entityId: localId,
+        action: 'UPSERT',
+        payload: payload,
+      ),
+    );
+
+    return Right(unit);
   }
 
   @override
@@ -202,13 +226,29 @@ class TaskRepositoryImpl implements TaskRepository {
     required int taskId,
     required String type,
   }) async {
-    if (await networkInfo.isConnected) {
+    final hasToken = _hasToken();
+    final isOnline = await networkInfo.isConnected;
+    final onlineAndAuthed = hasToken && isOnline;
+    if (onlineAndAuthed) {
       try {
         await remoteDataSource.deleteTask(taskId: taskId, type: type);
-        await localDataSource.deleteTask(taskId); // Xóa luôn ở local
+        await localDataSource.deleteTask(taskId);
         return Right(unit);
-      } catch (e) {
-        // Nếu xóa trên server lỗi, ta vẫn xóa ở local và ghi vào queue
+      } on DioException catch (e) {
+        if (_isAuthRedirectOrUnauthorized(e)) {
+          // silent
+        } else {
+          await localDataSource.deleteTask(taskId);
+          await syncQueueLocalDataSource.addAction(
+            SyncQueueItemModel(
+              entityType: 'TASK',
+              entityId: taskId,
+              action: 'DELETE',
+            ),
+          );
+          return Left(ServerFailure());
+        }
+      } catch (_) {
         await localDataSource.deleteTask(taskId);
         await syncQueueLocalDataSource.addAction(
           SyncQueueItemModel(
@@ -219,22 +259,16 @@ class TaskRepositoryImpl implements TaskRepository {
         );
         return Left(ServerFailure());
       }
-    } else {
-      try {
-        // 1. Xóa khỏi local database để UI cập nhật ngay
-        await localDataSource.deleteTask(taskId);
-        // 2. Thêm hành động "cần xóa" vào hàng đợi
-        await syncQueueLocalDataSource.addAction(
-          SyncQueueItemModel(
-            entityType: 'TASK',
-            entityId: taskId,
-            action: 'DELETE',
-          ),
-        );
-        return Right(unit);
-      } catch (e) {
-        return Left(CacheFailure());
-      }
     }
+    // offline hoặc guest
+    await localDataSource.deleteTask(taskId);
+    await syncQueueLocalDataSource.addAction(
+      SyncQueueItemModel(
+        entityType: 'TASK',
+        entityId: taskId,
+        action: 'DELETE',
+      ),
+    );
+    return Right(unit);
   }
 }

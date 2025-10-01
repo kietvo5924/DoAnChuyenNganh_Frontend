@@ -8,7 +8,11 @@ abstract class SyncEvent extends Equatable {
 
 class StartInitialSync extends SyncEvent {
   final bool forceUserRemote;
-  const StartInitialSync({this.forceUserRemote = false});
+  final bool mergeGuest; // NEW
+  const StartInitialSync({
+    this.forceUserRemote = false,
+    this.mergeGuest = false,
+  });
   @override
-  List<Object> get props => [forceUserRemote];
+  List<Object> get props => [forceUserRemote, mergeGuest];
 }

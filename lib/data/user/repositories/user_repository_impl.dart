@@ -26,13 +26,8 @@ class UserRepositoryImpl implements UserRepository {
       if (!forceRemote) {
         final cached = await localDataSource.getUser();
         if (cached != null) {
-          print('>>> USER SYNC: cache hit -> skip remote (forceRemote=false)');
           return Right(unit);
-        } else {
-          print('>>> USER SYNC: cache empty -> will fetch remote');
         }
-      } else {
-        print('>>> USER SYNC: forceRemote=true -> fetch remote');
       }
     } catch (e) {
       print('>>> USER SYNC: cache read error, fallback remote: $e');
@@ -41,7 +36,6 @@ class UserRepositoryImpl implements UserRepository {
     bool connected = true;
     try {
       connected = await networkInfo.isConnected;
-      print('>>> CONNECTIVITY CHECK (networkInfo.isConnected) = $connected');
     } catch (e) {
       print('>>> CONNECTIVITY CHECK ERROR: $e (giả định có mạng)');
       connected = true;
@@ -54,18 +48,10 @@ class UserRepositoryImpl implements UserRepository {
     }
 
     try {
-      print('>>> SYNC USER PROFILE REMOTE CALL');
       final remoteProfile = await remoteDataSource.getMyProfile();
-      print('>>> REMOTE PROFILE RECEIVED: $remoteProfile');
       await localDataSource.cacheUser(remoteProfile);
-      print('>>> USER SYNC: cached remote profile');
       return Right(unit);
-    } catch (e, st) {
-      print('>>> USER SYNC remote error: $e');
-      if (e is DioException) {
-        print('>>> DioException.status: ${e.response?.statusCode}');
-      }
-      print(st);
+    } catch (_) {
       return Left(ServerFailure());
     }
   }
