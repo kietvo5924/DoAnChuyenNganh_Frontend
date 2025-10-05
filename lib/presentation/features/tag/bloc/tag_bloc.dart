@@ -60,15 +60,28 @@ class TagBloc extends Bloc<TagEvent, TagState> {
     });
 
     on<SaveTagSubmitted>((event, emit) async {
-      await _saveTag(event.tag);
-      emit(const TagOperationSuccess(message: 'Đã lưu nhãn!'));
-      add(FetchTags());
+      final res = await _saveTag(event.tag);
+      res.fold((_) => emit(const TagError(message: 'Lưu nhãn thất bại')), (_) {
+        emit(const TagOperationSuccess(message: 'Đã lưu nhãn!'));
+        add(const FetchTags());
+      });
     });
 
     on<DeleteTagSubmitted>((event, emit) async {
-      await _deleteTag(event.tagId);
-      emit(const TagOperationSuccess(message: 'Đã xóa nhãn!'));
-      add(FetchTags());
+      final res = await _deleteTag(event.tagId);
+      res.fold(
+        // NEW: báo lỗi rõ ràng (tag có thể đang được dùng)
+        (_) => emit(
+          const TagError(
+            message:
+                'Không thể xóa nhãn vì đang được sử dụng trong công việc. Hãy gỡ nhãn khỏi các công việc trước.',
+          ),
+        ),
+        (_) {
+          emit(const TagOperationSuccess(message: 'Đã xóa nhãn!'));
+          add(const FetchTags());
+        },
+      );
     });
 
     on<ResetTags>((event, emit) {

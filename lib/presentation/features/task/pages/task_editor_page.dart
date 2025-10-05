@@ -151,21 +151,26 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
         ''',
         [taskId],
       );
-      if (rows.isNotEmpty) {
-        final updated = rows
-            .map(
-              (r) => TagEntity(
-                id: r['id'] as int,
-                name: (r['name'] as String?) ?? '',
-                color: r['color'] as String?,
-              ),
-            )
-            .toSet();
-        if (mounted) {
+      if (mounted) {
+        if (rows.isNotEmpty) {
+          final updated = rows
+              .map(
+                (r) => TagEntity(
+                  id: r['id'] as int,
+                  name: (r['name'] as String?) ?? '',
+                  color: r['color'] as String?,
+                ),
+              )
+              .toSet();
           setState(() {
             _selectedTags
               ..clear()
               ..addAll(updated);
+          });
+        } else {
+          // NEW: không còn mapping -> xóa nhãn đã chọn (tránh hiển thị nhãn đã xóa)
+          setState(() {
+            _selectedTags.clear();
           });
         }
       }
@@ -320,14 +325,53 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
     });
   }
 
+  void _confirmDeleteTask() async {
+    if (!_isEditing || widget.taskToEdit == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Xóa công việc'),
+        content: const Text('Bạn có chắc muốn xóa công việc này không?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Hủy'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Xóa', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    context.read<TaskEditorBloc>().add(
+      DeleteTaskSubmitted(
+        taskId: widget.taskToEdit!.id,
+        repeatType: widget.taskToEdit!.repeatType,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     _ensureCalendarsLoaded();
-    // REMOVED BlocProvider(create: ...) để tránh tạo Bloc mới mỗi rebuild
     return Scaffold(
       appBar: AppBar(
         title: Text(_isEditing ? 'Sửa công việc' : 'Tạo công việc mới'),
         actions: [
+          if (_isEditing)
+            BlocBuilder<TaskEditorBloc, TaskEditorState>(
+              builder: (context, state) {
+                final busy = state is TaskEditorLoading || _submitting;
+                return IconButton(
+                  tooltip: 'Xóa',
+                  onPressed: busy ? null : _confirmDeleteTask,
+                  icon: const Icon(Icons.delete_outline),
+                );
+              },
+            ),
           BlocBuilder<TaskEditorBloc, TaskEditorState>(
             builder: (context, state) {
               if (state is TaskEditorLoading || _submitting) {
@@ -353,10 +397,10 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
       body: BlocListener<TaskEditorBloc, TaskEditorState>(
         listener: (context, state) {
           if (state is TaskEditorSuccess) {
-            setState(() => _submitting = false); // NEW
+            setState(() => _submitting = false);
             Navigator.of(context).pop(true);
           } else if (state is TaskEditorFailure) {
-            setState(() => _submitting = false); // NEW
+            setState(() => _submitting = false);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(state.message),

@@ -57,32 +57,54 @@ class CalendarLocalDataSourceImpl implements CalendarLocalDataSource {
       for (final cal in calendars) {
         final offlineTempId = offlineNameToId[cal.name];
         if (offlineTempId != null) {
-          // Migrate: Insert lịch mới với id thật
-          await txn.insert(
+          // Migrate: safe upsert real id (UPDATE → INSERT IGNORE)
+          final updated = await txn.update(
             _tableName,
             cal.toDbMap(isSynced: true),
-            conflictAlgorithm: ConflictAlgorithm.replace,
+            where: 'id = ?',
+            whereArgs: [cal.id],
           );
+          if (updated == 0) {
+            await txn.insert(
+              _tableName,
+              cal.toDbMap(isSynced: true),
+              conflictAlgorithm: ConflictAlgorithm.ignore,
+            );
+          }
+
+          // Move tasks from temp calendar id to real id
           final moved = await txn.update(
             'tasks',
             {'calendar_id': cal.id},
             where: 'calendar_id = ?',
             whereArgs: [offlineTempId],
           );
+
+          // Remove temp calendar (id < 0)
           await txn.delete(
             _tableName,
             where: 'id = ?',
             whereArgs: [offlineTempId],
           );
+
           print(
             '[CalendarLocal] Migrated tempId=$offlineTempId -> realId=${cal.id}, movedTasks=$moved',
           );
         } else {
-          await txn.insert(
+          // Safe upsert for existing/remote calendars (avoid REPLACE to prevent cascade on tasks)
+          final updated = await txn.update(
             _tableName,
             cal.toDbMap(isSynced: true),
-            conflictAlgorithm: ConflictAlgorithm.replace,
+            where: 'id = ?',
+            whereArgs: [cal.id],
           );
+          if (updated == 0) {
+            await txn.insert(
+              _tableName,
+              cal.toDbMap(isSynced: true),
+              conflictAlgorithm: ConflictAlgorithm.ignore,
+            );
+          }
         }
       }
 
@@ -116,19 +138,6 @@ class CalendarLocalDataSourceImpl implements CalendarLocalDataSource {
         );
         print('[CalendarLocal] Fallback set default id=${calendars.first.id}');
       }
-
-      // NEW: Dọn các calendar âm còn sót lại (sau khi đã có ít nhất 1 remote id dương)
-      final hasPositiveRemote = calendars.any((c) => c.id > 0);
-      if (hasPositiveRemote) {
-        final remainingNeg = await txn.query(_tableName, where: 'id < 0');
-        if (remainingNeg.isNotEmpty) {
-          final count = remainingNeg.length;
-          await txn.delete(_tableName, where: 'id < 0');
-          print(
-            '[CalendarLocal] Cleaned $count stale negative calendar(s) post-auth',
-          );
-        }
-      }
     });
 
     print(
@@ -141,13 +150,23 @@ class CalendarLocalDataSourceImpl implements CalendarLocalDataSource {
     CalendarModel calendar, {
     required bool isSynced,
   }) async {
-    // Chấp nhận id âm (offline) => sẽ được thay thế sau khi queue sync
+    // Accept negative id (offline). Safe upsert: UPDATE → INSERT IGNORE (no REPLACE)
     final db = await dbService.database;
-    await db.insert(
-      _tableName,
-      calendar.toDbMap(isSynced: isSynced),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.transaction((txn) async {
+      final updated = await txn.update(
+        _tableName,
+        calendar.toDbMap(isSynced: isSynced),
+        where: 'id = ?',
+        whereArgs: [calendar.id],
+      );
+      if (updated == 0) {
+        await txn.insert(
+          _tableName,
+          calendar.toDbMap(isSynced: isSynced),
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+    });
     print(
       '[CalendarLocal] Saved calendar id=${calendar.id} isSynced=$isSynced',
     );
@@ -156,7 +175,60 @@ class CalendarLocalDataSourceImpl implements CalendarLocalDataSource {
   @override
   Future<void> deleteCalendar(int calendarId) async {
     final db = await dbService.database;
-    await db.delete(_tableName, where: 'id = ?', whereArgs: [calendarId]);
+    await db.transaction((txn) async {
+      // NEW: guard – không cho xóa lịch mặc định hoặc lịch cuối cùng
+      final totalRow = await txn.rawQuery(
+        'SELECT COUNT(*) AS c FROM $_tableName',
+      );
+      final total = (totalRow.first['c'] as int?) ?? 0;
+      if (total <= 1) {
+        throw StateError('Không thể xóa bộ lịch cuối cùng của bạn.');
+      }
+      final defRow = await txn.query(
+        _tableName,
+        columns: ['is_default'],
+        where: 'id = ?',
+        whereArgs: [calendarId],
+        limit: 1,
+      );
+      if (defRow.isNotEmpty && (defRow.first['is_default'] as int) == 1) {
+        throw StateError(
+          'Không thể xóa lịch mặc định. Vui lòng đặt một lịch khác làm mặc định trước.',
+        );
+      }
+
+      await txn.delete(_tableName, where: 'id = ?', whereArgs: [calendarId]);
+
+      // Giữ bảo đảm luôn có default nếu còn lịch
+      final countRows = await txn.rawQuery(
+        'SELECT COUNT(*) AS c FROM $_tableName LIMIT 1',
+      );
+      final left = (countRows.first['c'] as int?) ?? 0;
+      if (left == 0) return;
+
+      final hasDefaultRows = await txn.rawQuery(
+        'SELECT COUNT(*) AS c FROM $_tableName WHERE is_default = 1 LIMIT 1',
+      );
+      final hasDefault = ((hasDefaultRows.first['c'] as int?) ?? 0) > 0;
+      if (!hasDefault) {
+        final firstRow = await txn.query(
+          _tableName,
+          orderBy: 'id ASC',
+          limit: 1,
+          columns: ['id'],
+        );
+        if (firstRow.isNotEmpty) {
+          final newDefaultId = firstRow.first['id'] as int;
+          await txn.update(_tableName, {'is_default': 0});
+          await txn.update(
+            _tableName,
+            {'is_default': 1},
+            where: 'id = ?',
+            whereArgs: [newDefaultId],
+          );
+        }
+      }
+    });
     print('[CalendarLocal] Deleted calendar id=$calendarId');
   }
 

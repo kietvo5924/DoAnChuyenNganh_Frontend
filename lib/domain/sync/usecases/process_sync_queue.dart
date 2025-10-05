@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'package:dartz/dartz.dart';
+import 'package:planmate_app/data/tag/models/tag_model.dart';
 import '../../../core/error/failures.dart';
 import '../../../data/sync/datasources/sync_queue_local_data_source.dart';
 import '../../../data/task/datasources/task_remote_data_source.dart';
+import '../../../data/task/datasources/task_local_data_source.dart'; // NEW
 import '../../../data/calendar/datasources/calendar_remote_data_source.dart';
 import '../../../data/calendar/datasources/calendar_local_data_source.dart';
 import '../../../data/tag/datasources/tag_remote_data_source.dart';
@@ -11,6 +13,7 @@ import '../../../data/tag/datasources/tag_local_data_source.dart';
 class ProcessSyncQueue {
   final SyncQueueLocalDataSource localDataSource;
   final TaskRemoteDataSource taskRemoteDataSource;
+  final TaskLocalDataSource taskLocalDataSource; // NEW
   final CalendarRemoteDataSource calendarRemoteDataSource;
   final CalendarLocalDataSource calendarLocalDataSource;
   final TagRemoteDataSource tagRemoteDataSource;
@@ -19,6 +22,7 @@ class ProcessSyncQueue {
   ProcessSyncQueue({
     required this.localDataSource,
     required this.taskRemoteDataSource,
+    required this.taskLocalDataSource, // NEW
     required this.calendarRemoteDataSource,
     required this.calendarLocalDataSource,
     required this.tagRemoteDataSource,
@@ -27,43 +31,72 @@ class ProcessSyncQueue {
 
   @override
   Future<Either<Failure, Unit>> call() async {
+    // NEW: prune duplicates so only the latest action per key remains
+    await localDataSource.pruneDuplicates();
+
     final actions = await localDataSource.getQueuedActions();
     if (actions.isEmpty) return Right(unit);
     print('Processing ${actions.length} actions in sync queue (phased)...');
 
-    // PHÂN LOẠI
-    final calendarUpserts = <dynamic>[];
+    // NEW: determine final action per TAG (keep only the last one per entityId)
+    final Map<int, String> tagFinalAction = {};
+    for (final a in actions) {
+      if (a.entityType == 'TAG') {
+        tagFinalAction[a.entityId] = a.action; // created_at is ASC -> last wins
+      }
+    }
+    // NEW: purge older TAG actions that are not the last one
+    for (final a in actions) {
+      if (a.entityType == 'TAG' && tagFinalAction[a.entityId] != a.action) {
+        if (a.id != null) {
+          await localDataSource.deleteQueuedAction(a.id!);
+        }
+      }
+    }
+
+    // PHÂN LOẠI (dedupe UPSERTs in-memory as extra safety)
+    final calendarUpsertMap = <int, dynamic>{}; // key: entityId
     final calendarDeletes = <dynamic>[];
     final calendarSetDefault = <dynamic>[];
-    final tagUpserts = <dynamic>[];
+    final tagUpsertMap = <int, dynamic>{};
     final tagDeletes = <dynamic>[];
-    final taskUpserts = <dynamic>[];
+    final taskUpsertMap = <int, dynamic>{};
     final taskDeletes = <dynamic>[];
 
     for (final a in actions) {
       switch (a.entityType) {
         case 'CALENDAR':
-          if (a.action == 'UPSERT')
-            calendarUpserts.add(a);
-          else if (a.action == 'DELETE')
+          if (a.action == 'UPSERT') {
+            // keep last occurrence
+            calendarUpsertMap[a.entityId] = a;
+          } else if (a.action == 'DELETE') {
             calendarDeletes.add(a);
-          else if (a.action == 'SET_DEFAULT')
+          } else if (a.action == 'SET_DEFAULT') {
             calendarSetDefault.add(a);
+          }
           break;
         case 'TAG':
-          if (a.action == 'UPSERT')
-            tagUpserts.add(a);
-          else if (a.action == 'DELETE')
+          // CHANGED: only keep last action for each entityId
+          if (tagFinalAction[a.entityId] == 'UPSERT' && a.action == 'UPSERT') {
+            tagUpsertMap[a.entityId] = a;
+          } else if (tagFinalAction[a.entityId] == 'DELETE' &&
+              a.action == 'DELETE') {
             tagDeletes.add(a);
+          }
           break;
         case 'TASK':
-          if (a.action == 'UPSERT')
-            taskUpserts.add(a);
-          else if (a.action == 'DELETE')
+          if (a.action == 'UPSERT') {
+            taskUpsertMap[a.entityId] = a;
+          } else if (a.action == 'DELETE') {
             taskDeletes.add(a);
+          }
           break;
       }
     }
+
+    final calendarUpserts = calendarUpsertMap.values.toList();
+    final tagUpserts = tagUpsertMap.values.toList();
+    final taskUpserts = taskUpsertMap.values.toList();
 
     final Map<int, int> calendarIdMap = {}; // tempId -> realId
     final Map<int, int> tagIdMap = {}; // tempId -> realId
@@ -148,9 +181,20 @@ class ProcessSyncQueue {
         if (a.entityId <= 0) {
           final created = await tagRemoteDataSource.createTag(name, color);
           tagIdMap[a.entityId] = created.id;
+          // NEW: persist real tag locally and migrate temp usages
+          await tagLocalDataSource.saveTag(created, isSynced: true);
+          await tagLocalDataSource.migrateTagId(
+            fromId: a.entityId,
+            toId: created.id,
+          );
           print('[Queue] Created tag temp=${a.entityId} -> id=${created.id}');
         } else {
           await tagRemoteDataSource.updateTag(a.entityId, name, color);
+          // NEW: also ensure local upsert (in case offline edits were pending)
+          await tagLocalDataSource.saveTag(
+            TagModel(id: a.entityId, name: name, color: color),
+            isSynced: true,
+          );
         }
         tagChanged = true;
         await localDataSource.deleteQueuedAction(a.id!);
@@ -159,12 +203,18 @@ class ProcessSyncQueue {
       }
     }
 
-    // 4. TAG DELETE
+    // 4. TAG DELETE (only final deletes survive)
     for (final a in tagDeletes) {
       try {
-        if (a.entityId > 0) {
-          await tagRemoteDataSource.deleteTag(a.entityId);
+        // Map temp id if it was created earlier in this run (rare, but safe)
+        int toDeleteId = a.entityId;
+        if (toDeleteId <= 0 && tagIdMap.containsKey(toDeleteId)) {
+          toDeleteId = tagIdMap[toDeleteId]!;
         }
+        if (toDeleteId > 0) {
+          await tagRemoteDataSource.deleteTag(toDeleteId);
+        }
+        // Local row was already removed on user action; just clear queue item
         tagChanged = true;
         await localDataSource.deleteQueuedAction(a.id!);
       } catch (e) {
@@ -172,7 +222,7 @@ class ProcessSyncQueue {
       }
     }
 
-    // 5. TASK UPSERT (sau khi có mapping calendar & tag)
+    // 5. TASK UPSERT (deduped)
     for (final a in taskUpserts) {
       try {
         if (a.payload == null) {
@@ -182,11 +232,11 @@ class ProcessSyncQueue {
         final data = jsonDecode(a.payload!) as Map<String, dynamic>;
         int calendarId = data['calendarId'] as int;
         final taskData = Map<String, dynamic>.from(data['taskData'] ?? {});
-        // Map calendar
+        // Map calendar if needed
         if (calendarId <= 0 && calendarIdMap.containsKey(calendarId)) {
           calendarId = calendarIdMap[calendarId]!;
         }
-        // Map tagIds
+        // Map tagIds if needed
         if (taskData['tagIds'] is List) {
           final List raw = taskData['tagIds'] as List;
           final mapped = raw
@@ -201,11 +251,19 @@ class ProcessSyncQueue {
           taskData['tagIds'] = mapped;
         }
         final isNew = a.entityId <= 0;
+
+        // POST or PUT to server
         await taskRemoteDataSource.saveTask(
           calendarId: calendarId,
           taskId: isNew ? null : a.entityId,
           taskData: taskData,
         );
+
+        // NEW: if this was created from a temp local task, remove temp to avoid duplicates
+        if (isNew) {
+          await taskLocalDataSource.deleteTask(a.entityId);
+        }
+
         await localDataSource.deleteQueuedAction(a.id!);
       } catch (e) {
         print('[Queue] Task UPSERT fail id=${a.entityId}: $e');

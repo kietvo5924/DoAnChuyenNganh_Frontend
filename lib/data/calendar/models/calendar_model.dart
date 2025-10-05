@@ -13,12 +13,24 @@ class CalendarModel extends CalendarEntity {
          isDefault: isDefault,
        );
 
+  // NEW: helper parse bool an toàn
+  static bool _asBool(dynamic v) {
+    if (v is bool) return v;
+    if (v is int) return v == 1;
+    if (v is String) {
+      final s = v.toLowerCase().trim();
+      return s == 'true' || s == '1';
+    }
+    return false;
+  }
+
   factory CalendarModel.fromJson(Map<String, dynamic> json) {
     return CalendarModel(
       id: json['id'],
       name: json['name'],
       description: json['description'],
-      isDefault: json['isDefault'] ?? false,
+      // CHANGED: nhận cả 'isDefault' và 'default' từ backend
+      isDefault: _asBool(json['isDefault'] ?? json['default'] ?? false),
     );
   }
 

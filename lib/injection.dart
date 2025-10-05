@@ -1,3 +1,4 @@
+import 'dart:async'; // NEW
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:get_it/get_it.dart';
@@ -68,6 +69,10 @@ import 'presentation/features/task/bloc/task_list_bloc.dart';
 import 'presentation/features/user/bloc/user_bloc.dart';
 
 final getIt = GetIt.instance;
+
+// NEW: connectivity listener guards
+bool _connectivityListenerAttached = false;
+bool _queueSyncRunning = false;
 
 Future<void> configureDependencies() async {
   // == External ==
@@ -209,6 +214,7 @@ Future<void> configureDependencies() async {
     () => ProcessSyncQueue(
       localDataSource: getIt(),
       taskRemoteDataSource: getIt(),
+      taskLocalDataSource: getIt(), // NEW
       calendarRemoteDataSource: getIt(),
       calendarLocalDataSource: getIt(),
       tagRemoteDataSource: getIt(),
@@ -263,7 +269,12 @@ Future<void> configureDependencies() async {
   getIt.registerFactory(
     () => TaskListBloc(getLocalTasksInCalendar: getIt(), deleteTask: getIt()),
   );
-  getIt.registerFactory(() => TaskEditorBloc(saveTask: getIt()));
+  getIt.registerFactory(
+    () => TaskEditorBloc(
+      saveTask: getIt(),
+      deleteTask: getIt(), // NEW
+    ),
+  );
 
   // Sửa lại tên Use Case cho khớp
   getIt.registerFactory(
@@ -288,4 +299,30 @@ Future<void> configureDependencies() async {
       uploadGuestData: getIt(),
     ),
   );
+
+  // NEW: Auto process sync when network is back
+  if (!_connectivityListenerAttached) {
+    _connectivityListenerAttached = true;
+    final connectivity = getIt<Connectivity>();
+    connectivity.onConnectivityChanged.listen((_) async {
+      // Only run when actually connected
+      final connected = await getIt<NetworkInfo>().isConnected;
+      if (!connected || _queueSyncRunning) return;
+
+      _queueSyncRunning = true;
+      try {
+        // 1) Process offline queue
+        await getIt<ProcessSyncQueue>()();
+
+        // 2) Refresh locals from remote to reflect latest states
+        await getIt<SyncRemoteCalendars>()();
+        await getIt<SyncRemoteTags>()();
+        await getIt<SyncAllRemoteTasks>()();
+      } catch (_) {
+        // silent
+      } finally {
+        _queueSyncRunning = false;
+      }
+    });
+  }
 }

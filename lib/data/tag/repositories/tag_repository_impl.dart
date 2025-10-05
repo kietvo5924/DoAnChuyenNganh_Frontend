@@ -88,13 +88,22 @@ class TagRepositoryImpl implements TagRepository {
         return Left(ServerFailure());
       }
     }
-    int localId = tag.id <= 0 ? -DateTime.now().millisecondsSinceEpoch : tag.id;
+
+    // OFFLINE: only generate a new negative id for brand-new tags (id == 0)
+    // If id < 0 (existing offline tag), KEEP the same id to avoid duplicates.
+    int localId = tag.id;
+    if (localId == 0) {
+      localId = -DateTime.now().millisecondsSinceEpoch;
+    }
+
     final localModel = TagModel(id: localId, name: tag.name, color: tag.color);
     await localDataSource.saveTag(localModel, isSynced: false);
+
     await syncQueueLocalDataSource.addAction(
       SyncQueueItemModel(
         entityType: 'TAG',
-        entityId: localId,
+        entityId:
+            localId, // same id across edits -> queue replaces older UPSERT
         action: 'UPSERT',
         payload: '{"name":"${tag.name}","color":"${tag.color}"}',
       ),
@@ -104,27 +113,39 @@ class TagRepositoryImpl implements TagRepository {
 
   @override
   Future<Either<Failure, Unit>> deleteTag(int tagId) async {
-    final connected = await networkInfo.isConnected;
-    final onlineAndAuthed = connected && _hasToken();
-    if (onlineAndAuthed && tagId > 0) {
-      try {
-        await remoteDataSource.deleteTag(tagId);
-        await localDataSource.deleteTag(tagId);
-        return Right(unit);
-      } on DioException catch (e) {
-        if (_isAuthRedirectOrUnauthorized(e)) {
-          // silent
-        } else {
-          return Left(ServerFailure());
+    try {
+      final connected = await networkInfo.isConnected;
+      final onlineAndAuthed = connected && _hasToken();
+
+      if (onlineAndAuthed && tagId > 0) {
+        try {
+          await remoteDataSource.deleteTag(tagId);
+          // Local delete will cascade remove mappings in task_tags_local
+          await localDataSource.deleteTag(tagId);
+          return Right(unit);
+        } on DioException catch (e) {
+          // If auth issues -> fail without touching local
+          if (_isAuthRedirectOrUnauthorized(e)) {
+            return Left(ServerFailure());
+          }
+          // Otherwise fall through to offline path below
+        } catch (_) {
+          // Fall through to offline path
         }
-      } catch (_) {
-        return Left(ServerFailure());
       }
+
+      // Offline or fallback: delete local and queue DELETE for later
+      await localDataSource.deleteTag(tagId);
+      await syncQueueLocalDataSource.addAction(
+        SyncQueueItemModel(
+          entityType: 'TAG',
+          entityId: tagId,
+          action: 'DELETE',
+        ),
+      );
+      return Right(unit);
+    } catch (_) {
+      return Left(ServerFailure());
     }
-    await localDataSource.deleteTag(tagId);
-    await syncQueueLocalDataSource.addAction(
-      SyncQueueItemModel(entityType: 'TAG', entityId: tagId, action: 'DELETE'),
-    );
-    return Right(unit);
   }
 }

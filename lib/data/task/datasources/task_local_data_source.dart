@@ -128,8 +128,19 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
               }
             }
           }
+
+          // NEW: lọc các tag fallback theo các id còn tồn tại trong bảng tags
           if (tags.isNotEmpty) {
-            // removed debug print
+            final ids = tags.map((e) => e.id).toList();
+            final placeholders = List.filled(ids.length, '?').join(',');
+            final existingRows = await db.query(
+              'tags',
+              columns: ['id'],
+              where: 'id IN ($placeholders)',
+              whereArgs: ids,
+            );
+            final existingIds = existingRows.map((r) => r['id'] as int).toSet();
+            tags = tags.where((t) => existingIds.contains(t.id)).toSet();
           }
         } catch (e) {
           print('[TaskLocal][FALLBACK][ERR] task_id=${taskMap['id']} $e');
@@ -146,9 +157,7 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
     final db = await dbService.database;
     await db.transaction((txn) async {
       await txn.execute('PRAGMA foreign_keys = ON');
-      await _ensureTagMetaColumns(
-        txn,
-      ); // CHANGED (thay cho _ensureRawTagIdsColumn)
+      await _ensureTagMetaColumns(txn);
 
       // Thu thập tag
       final Map<int, TagModel> allTags = {};
@@ -160,13 +169,22 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
           });
         }
       }
+      // CHANGED: update-first, then insert IGNORE (tránh REPLACE gây cascade)
       for (final tag in allTags.values) {
-        await txn.insert('tags', {
-          'id': tag.id,
-          'name': tag.name,
-          'color': tag.color,
-          'is_synced': 1,
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        final updated = await txn.update(
+          'tags',
+          {'name': tag.name, 'color': tag.color, 'is_synced': 1},
+          where: 'id = ?',
+          whereArgs: [tag.id],
+        );
+        if (updated == 0) {
+          await txn.insert('tags', {
+            'id': tag.id,
+            'name': tag.name,
+            'color': tag.color,
+            'is_synced': 1,
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        }
       }
 
       int totalMappingInserted = 0;

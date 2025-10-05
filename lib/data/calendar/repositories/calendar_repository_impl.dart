@@ -129,6 +129,25 @@ class CalendarRepositoryImpl implements CalendarRepository {
   @override
   Future<Either<Failure, Unit>> deleteCalendar(int calendarId) async {
     try {
+      // NEW: offline guard theo backend rule
+      final locals = await localDataSource.getAllCalendars();
+      // total <=1?
+      if (locals.length <= 1) {
+        return Left(ServerFailure()); // BLoC sẽ chuyển thành thông báo lỗi
+      }
+      final current = locals.firstWhere(
+        (c) => c.id == calendarId,
+        orElse: () => const CalendarModel(
+          id: -1,
+          name: '',
+          description: null,
+          isDefault: false,
+        ),
+      );
+      if (current.id == calendarId && current.isDefault) {
+        return Left(ServerFailure());
+      }
+
       final onlineAndAuthed =
           await networkInfo.isConnected && _hasToken(); // NEW
       if (onlineAndAuthed && calendarId > 0) {

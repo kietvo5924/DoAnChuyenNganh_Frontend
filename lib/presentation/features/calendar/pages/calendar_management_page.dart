@@ -28,6 +28,43 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
   }
 
   void _showDeleteConfirmationDialog(BuildContext context, int calendarId) {
+    // NEW: guard trước khi mở dialog
+    final list = _cachedCalendars;
+    if (list.length <= 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Không thể xóa bộ lịch cuối cùng của bạn.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // CHANGED: dùng indexWhere để tránh lỗi kiểu generic với orElse
+    final idx = list.indexWhere((c) => c.id == calendarId);
+    final cal = idx >= 0 ? list[idx] : null;
+    if (cal == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Không tìm thấy lịch để xóa.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    if (cal.isDefault) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Không thể xóa lịch mặc định. Hãy đặt lịch khác làm mặc định trước.',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -127,7 +164,17 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (calendar.isDefault)
-                          const Icon(Icons.star, color: Colors.amber),
+                          const Icon(Icons.star, color: Colors.amber)
+                        else
+                          IconButton(
+                            tooltip: 'Đặt làm mặc định',
+                            icon: const Icon(Icons.star_border_outlined),
+                            onPressed: () => context.read<CalendarBloc>().add(
+                              SetDefaultCalendarSubmitted(
+                                calendarId: calendar.id,
+                              ),
+                            ),
+                          ),
                         IconButton(
                           icon: const Icon(
                             Icons.edit_outlined,

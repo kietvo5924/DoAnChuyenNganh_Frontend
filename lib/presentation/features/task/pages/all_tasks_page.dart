@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
+import 'package:planmate_app/presentation/features/calendar/bloc/calendar_event.dart';
 import '../../../../domain/task/entities/task_entity.dart';
 import '../../calendar/bloc/calendar_bloc.dart';
 import '../../calendar/bloc/calendar_state.dart';
@@ -21,6 +22,11 @@ class _AllTasksPageState extends State<AllTasksPage> {
   void initState() {
     super.initState();
     _fetchAllTasks();
+    // NEW: đảm bảo có lịch sẵn cho dialog chọn
+    final calBloc = context.read<CalendarBloc>();
+    if (calBloc.state is! CalendarLoaded) {
+      calBloc.add(FetchCalendars());
+    }
   }
 
   void _fetchAllTasks() {
@@ -29,36 +35,71 @@ class _AllTasksPageState extends State<AllTasksPage> {
   }
 
   void _showCalendarSelectionDialog(BuildContext pageContext) {
+    // NEW: kích hoạt load lịch nếu chưa có
+    final calBloc = pageContext.read<CalendarBloc>();
+    if (calBloc.state is! CalendarLoaded) {
+      calBloc.add(FetchCalendars());
+    }
+
     showDialog(
       context: pageContext,
       builder: (dialogContext) {
-        return BlocBuilder<CalendarBloc, CalendarState>(
-          builder: (context, state) {
-            if (state is CalendarLoaded) {
-              return SimpleDialog(
-                title: const Text('Chọn một lịch để thêm công việc'),
-                children: state.calendars.map((calendar) {
-                  return SimpleDialogOption(
-                    onPressed: () {
-                      Navigator.pop(dialogContext);
-                      Navigator.push(
-                        pageContext,
-                        MaterialPageRoute(
-                          builder: (_) => TaskEditorPage(calendar: calendar),
-                        ),
-                      ).then((created) {
-                        if (created == true) _fetchAllTasks();
-                      });
-                    },
-                    child: Text(calendar.name),
+        // NEW: đảm bảo dialog dùng đúng instance CalendarBloc
+        return BlocProvider.value(
+          value: calBloc,
+          child: BlocBuilder<CalendarBloc, CalendarState>(
+            builder: (context, state) {
+              if (state is CalendarLoaded) {
+                if (state.calendars.isEmpty) {
+                  return AlertDialog(
+                    title: const Text('Chọn lịch'),
+                    content: const Text(
+                      'Chưa có lịch nào. Hãy tạo lịch trước.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        child: const Text('Đóng'),
+                      ),
+                    ],
                   );
-                }).toList(),
+                }
+                return SimpleDialog(
+                  title: const Text('Chọn một lịch để thêm công việc'),
+                  children: state.calendars.map((calendar) {
+                    return SimpleDialogOption(
+                      onPressed: () {
+                        Navigator.pop(dialogContext);
+                        Navigator.push(
+                          pageContext,
+                          MaterialPageRoute(
+                            builder: (_) => TaskEditorPage(calendar: calendar),
+                          ),
+                        ).then((created) {
+                          if (created == true) _fetchAllTasks();
+                        });
+                      },
+                      child: Text(calendar.name),
+                    );
+                  }).toList(),
+                );
+              }
+              // Loading hoặc state khác
+              return const Dialog(
+                child: Padding(
+                  padding: EdgeInsets.all(20.0),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(width: 16),
+                      Text('Đang tải danh sách lịch...'),
+                    ],
+                  ),
+                ),
               );
-            }
-            return const Dialog(
-              child: Center(child: CircularProgressIndicator()),
-            );
-          },
+            },
+          ),
         );
       },
     );
@@ -82,10 +123,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
                   final taskWithCalendar = state.tasks[index];
                   final task = taskWithCalendar.task;
                   final calendar = taskWithCalendar.calendar;
-
-                  // Sử dụng getter `sortDate` đã được định nghĩa trong TaskEntity
                   final displayDate = task.sortDate;
-
                   return ListTile(
                     leading: Icon(
                       task.repeatType == RepeatType.NONE

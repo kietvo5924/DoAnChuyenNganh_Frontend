@@ -46,3 +46,13 @@ class SaveTaskSubmitted extends TaskEditorEvent {
     this.repeatEnd,
   });
 }
+
+// NEW: event xóa công việc (SINGLE/RECURRING dựa theo repeatType)
+class DeleteTaskSubmitted extends TaskEditorEvent {
+  final int taskId;
+  final RepeatType repeatType;
+  const DeleteTaskSubmitted({required this.taskId, required this.repeatType});
+
+  @override
+  List<Object?> get props => [taskId, repeatType];
+}
