@@ -70,6 +70,17 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
   bool _submitting = false; // NEW
   bool _tagResolving = false; // NEW
   bool _tagResolvedOnce = false; // NEW
+  bool _preDayNotify = false; // NEW: per-task toggle
+
+  // NEW: Global notification preferences (applies to all tasks)
+  final _leadMinutesCtl = TextEditingController(text: '15');
+  bool _preDayEnabled = true;
+  TimeOfDay _preDayTime = const TimeOfDay(hour: 18, minute: 0);
+
+  static const _kLeadMinutesKey = 'notify_lead_minutes';
+  static const _kPreDayEnabledKey = 'notify_preday_enabled';
+  static const _kPreDayHourKey = 'notify_preday_hour';
+  static const _kPreDayMinuteKey = 'notify_preday_minute';
 
   @override
   void initState() {
@@ -127,7 +138,9 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
           } catch (e) {}
         }
       }
+      _preDayNotify = task.preDayNotify == true; // NEW
     }
+    // REMOVE: _loadNotifyPrefs();
   }
 
   void _scheduleResolveTags(int taskId) {
@@ -232,6 +245,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
     _titleController.dispose();
     _descriptionController.dispose();
     _repeatIntervalController.dispose();
+    // REMOVE: _leadMinutesCtl.dispose();
     super.dispose();
   }
 
@@ -250,6 +264,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
     }[_selectedRepeatOption]!;
 
     setState(() => _submitting = true); // NEW
+    // REMOVE: _persistNotifyPrefs();
 
     context.read<TaskEditorBloc>().add(
       SaveTaskSubmitted(
@@ -288,6 +303,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
               )
             : null,
         repeatDayOfMonth: _selectedDayOfMonth,
+        preDayNotify: _preDayNotify, // NEW
       ),
     );
   }
@@ -321,6 +337,31 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
       } else {
         _endDate = date;
         _endTime = time;
+      }
+    });
+  }
+
+  // NEW: time-only picker for recurring tasks
+  Future<void> _selectTime(BuildContext context, bool isStart) async {
+    final time = await showTimePicker(
+      context: context,
+      initialTime: isStart ? _startTime : _endTime,
+    );
+    if (time == null) return;
+    setState(() {
+      if (isStart) {
+        _startTime = time;
+        // keep _startDate as anchor date; no date change here
+      } else {
+        _endTime = time;
+        // keep _endDate aligned hour/min if needed
+        _endDate = DateTime(
+          _startDate.year,
+          _startDate.month,
+          _startDate.day,
+          _endTime.hour,
+          _endTime.minute,
+        );
       }
     });
   }
@@ -435,29 +476,46 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
                 maxLines: 3,
               ),
               const SizedBox(height: 16),
-              SwitchListTile(
-                title: const Text('Cả ngày'),
-                value: _isAllDay,
-                onChanged: (value) => setState(() => _isAllDay = value),
-              ),
-              ListTile(
-                leading: const Icon(Icons.access_time),
-                title: Text(
-                  _isAllDay
-                      ? 'Bắt đầu: ${DateFormat('dd/MM/yyyy').format(_startDate)}'
-                      : 'Bắt đầu: ${DateFormat('dd/MM/yyyy').format(_startDate)} ${_startTime.format(context)}',
+              // CHANGED: hide "Cả ngày" when repeating
+              if (_selectedRepeatOption == RepeatOption.none)
+                SwitchListTile(
+                  title: const Text('Cả ngày'),
+                  value: _isAllDay,
+                  onChanged: (value) => setState(() => _isAllDay = value),
                 ),
-                onTap: () => _selectDateTime(context, true),
-              ),
-              ListTile(
-                leading: const Icon(Icons.access_time_filled),
-                title: Text(
-                  _isAllDay
-                      ? 'Kết thúc: ${DateFormat('dd/MM/yyyy').format(_endDate)}'
-                      : 'Kết thúc: ${DateFormat('dd/MM/yyyy').format(_endDate)} ${_endTime.format(context)}',
+              // CHANGED: start/end pickers depend on repeat option
+              if (_selectedRepeatOption == RepeatOption.none) ...[
+                ListTile(
+                  leading: const Icon(Icons.access_time),
+                  title: Text(
+                    _isAllDay
+                        ? 'Bắt đầu: ${DateFormat('dd/MM/yyyy').format(_startDate)}'
+                        : 'Bắt đầu: ${DateFormat('dd/MM/yyyy').format(_startDate)} ${_startTime.format(context)}',
+                  ),
+                  onTap: () => _selectDateTime(context, true),
                 ),
-                onTap: () => _selectDateTime(context, false),
-              ),
+                ListTile(
+                  leading: const Icon(Icons.access_time_filled),
+                  title: Text(
+                    _isAllDay
+                        ? 'Kết thúc: ${DateFormat('dd/MM/yyyy').format(_endDate)}'
+                        : 'Kết thúc: ${DateFormat('dd/MM/yyyy').format(_endDate)} ${_endTime.format(context)}',
+                  ),
+                  onTap: () => _selectDateTime(context, false),
+                ),
+              ] else ...[
+                // Recurring: time-only (no date dialog)
+                ListTile(
+                  leading: const Icon(Icons.schedule),
+                  title: Text('Giờ bắt đầu: ${_startTime.format(context)}'),
+                  onTap: () => _selectTime(context, true),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.schedule_send),
+                  title: Text('Giờ kết thúc: ${_endTime.format(context)}'),
+                  onTap: () => _selectTime(context, false),
+                ),
+              ],
               const Divider(height: 32),
               DropdownButtonFormField<RepeatOption>(
                 value: _selectedRepeatOption,
@@ -487,9 +545,13 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
                     child: Text('Hàng năm'),
                   ),
                 ],
-                // -- SỬA LỖI Ở ĐÂY: `onChanged` viết hoa chữ `C` --
-                onChanged: (value) =>
-                    setState(() => _selectedRepeatOption = value!),
+                // CHANGED: force isAllDay=false when switching to repeating
+                onChanged: (value) => setState(() {
+                  _selectedRepeatOption = value!;
+                  if (_selectedRepeatOption != RepeatOption.none) {
+                    _isAllDay = false;
+                  }
+                }),
               ),
               if (_selectedRepeatOption != RepeatOption.none) ...[
                 const SizedBox(height: 16),
@@ -545,6 +607,18 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
                   ),
                 ),
               _buildTagSelector(),
+              // CHANGED: when repeating, show per-task pre-day toggle instead of global prefs
+              if (_selectedRepeatOption != RepeatOption.none) ...[
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  title: const Text('Nhắc trước 1 ngày (18:00)'),
+                  subtitle: const Text('Áp dụng riêng cho công việc này'),
+                  value: _preDayNotify,
+                  onChanged: (v) => setState(() => _preDayNotify = v),
+                ),
+              ],
+              // NEW: bottom spacer to avoid overlap with system home bar
+              SizedBox(height: MediaQuery.of(context).padding.bottom + 24),
             ],
           ),
         ),

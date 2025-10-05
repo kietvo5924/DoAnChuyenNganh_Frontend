@@ -84,13 +84,22 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
     return _mapsToTasksWithTags(taskMaps, db);
   }
 
-  // CHANGED: fallback nếu không có mapping
+  // CHANGED: fallback nếu không có mapping + add debug logs
   Future<List<TaskModel>> _mapsToTasksWithTags(
     List<Map<String, dynamic>> taskMaps,
     Database db,
   ) async {
     List<TaskModel> tasks = [];
     for (var taskMap in taskMaps) {
+      // NEW: debug raw columns for recurring time
+      try {
+        final rid = taskMap['id'];
+        final rtype = taskMap['repeat_type'];
+        final rstartTimeStr = taskMap['repeat_start_time'];
+        print(
+          '[TaskLocal][DBG] id=$rid repeat_type=$rtype repeat_start_time="$rstartTimeStr"',
+        );
+      } catch (_) {}
       final List<Map<String, dynamic>> tagMaps = await db.rawQuery(
         'SELECT T.* FROM tags T INNER JOIN task_tags_local TT ON T.id = TT.tag_id WHERE TT.task_id = ?',
         [taskMap['id']],
@@ -207,6 +216,20 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
             ..['raw_tag_ids'] =
                 jsonEncode(rawIds) // CHANGED
             ..['raw_tag_meta'] = jsonEncode(rawMeta); // NEW
+
+          // NEW: preserve existing pre_day_notify if remote didn’t provide
+          if (task.preDayNotify == null) {
+            final existing = await txn.query(
+              _taskTable,
+              columns: ['pre_day_notify'],
+              where: 'id = ?',
+              whereArgs: [task.id],
+              limit: 1,
+            );
+            if (existing.isNotEmpty) {
+              taskMap['pre_day_notify'] = existing.first['pre_day_notify'];
+            }
+          }
 
           await txn.insert(
             _taskTable,

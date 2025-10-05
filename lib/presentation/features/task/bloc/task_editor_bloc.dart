@@ -40,6 +40,8 @@ class TaskEditorBloc extends Bloc<TaskEditorEvent, TaskEditorState> {
         repeatInterval: event.repeatInterval,
         repeatDays: event.repeatDays,
         repeatDayOfMonth: event.repeatDayOfMonth,
+        exceptions: event.repeatType == RepeatType.NONE ? null : null,
+        preDayNotify: event.preDayNotify, // NEW
       );
 
       final result = await _saveTask(taskToSave);

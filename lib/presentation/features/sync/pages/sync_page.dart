@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:planmate_app/presentation/features/tag/bloc/tag_event.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:planmate_app/core/services/notification_service.dart';
 import '../../../../core/services/database_service.dart';
 import '../../../../injection.dart';
 import '../../auth/bloc/auth_bloc.dart';
@@ -55,6 +56,10 @@ class _SyncPageState extends State<SyncPage> {
         ) ??
         0;
     final bool needMerge = (negCalendars + negTags + negTasks + queue) > 0;
+
+    // NEW: ensure no stale guest notifications remain; sync will reschedule
+    await getIt<NotificationService>().cancelAllNotifications();
+
     if (mounted) {
       context.read<SyncBloc>().add(StartInitialSync(mergeGuest: needMerge));
     }

@@ -32,9 +32,24 @@ class TaskEntity extends Equatable {
   final DateTime? repeatStart;
   final DateTime? repeatEnd;
   final String? exceptions;
+  final bool? preDayNotify; // NEW: per-task pre-day at 18:00
 
   DateTime get sortDate {
-    return startTime ?? repeatStart ?? DateTime.now();
+    // CHANGED: include repeatStartTime for recurring instead of midnight
+    if (startTime != null) return startTime!;
+    if (repeatStart != null) {
+      if (repeatStartTime != null) {
+        return DateTime(
+          repeatStart!.year,
+          repeatStart!.month,
+          repeatStart!.day,
+          repeatStartTime!.hour,
+          repeatStartTime!.minute,
+        );
+      }
+      return repeatStart!;
+    }
+    return DateTime.now();
   }
 
   const TaskEntity({
@@ -60,6 +75,7 @@ class TaskEntity extends Equatable {
     this.repeatStart,
     this.repeatEnd,
     this.exceptions,
+    this.preDayNotify, // NEW
   });
 
   @override
@@ -84,5 +100,6 @@ class TaskEntity extends Equatable {
     repeatStart,
     repeatEnd,
     exceptions,
+    preDayNotify, // NEW
   ];
 }

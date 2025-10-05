@@ -14,10 +14,13 @@ import 'presentation/features/user/bloc/user_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:planmate_app/presentation/features/home/bloc/home_bloc.dart';
+import 'core/services/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await configureDependencies();
+
+  await getIt<NotificationService>().init();
 
   await initializeDateFormatting('vi_VN', null);
   runApp(const MyApp());

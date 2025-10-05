@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api/dio_interceptor.dart';
 import 'core/network/network_info.dart';
 import 'core/services/database_service.dart';
+import 'core/services/notification_service.dart'; // NEW
 
 // Data Layer
 import 'data/auth/datasources/auth_remote_data_source.dart';
@@ -56,6 +57,7 @@ import 'domain/user/repositories/user_repository.dart';
 import 'domain/user/usecases/change_password.dart';
 import 'domain/user/usecases/get_cached_user.dart';
 import 'domain/user/usecases/sync_user_profile.dart';
+import 'domain/notification/usecases/reschedule_all_notifications.dart'; // NEW
 
 // Presentation Layer (BLoCs)
 import 'presentation/features/auth/bloc/auth_bloc.dart';
@@ -99,6 +101,10 @@ Future<void> configureDependencies() async {
 
   // == Core ==
   getIt.registerLazySingleton<NetworkInfo>(() => NetworkInfoImpl(getIt()));
+  getIt.registerLazySingleton<NotificationService>(
+    // NEW
+    () => NotificationService.instance,
+  );
 
   // == Data Sources ==
   getIt.registerLazySingleton<AuthRemoteDataSource>(
@@ -172,6 +178,7 @@ Future<void> configureDependencies() async {
       networkInfo: getIt(),
       syncQueueLocalDataSource: getIt(),
       prefs: getIt(), // NEW
+      notificationService: getIt(), // NEW
     ),
   );
 
@@ -229,6 +236,12 @@ Future<void> configureDependencies() async {
       dbService: getIt(),
       queueDs: getIt(),
       processSyncQueue: getIt(),
+    ),
+  ); // NEW
+  getIt.registerLazySingleton(
+    () => RescheduleAllNotifications(
+      notificationService: getIt(),
+      dbService: getIt(),
     ),
   ); // NEW
 
@@ -318,6 +331,9 @@ Future<void> configureDependencies() async {
         await getIt<SyncRemoteCalendars>()();
         await getIt<SyncRemoteTags>()();
         await getIt<SyncAllRemoteTasks>()();
+
+        // 3) Reschedule notifications from local DB (NEW)
+        await getIt<RescheduleAllNotifications>()(); // CHANGED
       } catch (_) {
         // silent
       } finally {

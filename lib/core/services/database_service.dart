@@ -25,6 +25,10 @@ class DatabaseService {
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
+      onOpen: (db) async {
+        // NEW: lightweight migrations for existing installs
+        await _ensureTaskPreDayColumn(db);
+      },
     );
   }
 
@@ -97,6 +101,7 @@ class DatabaseService {
         repeat_end TEXT,
         exceptions TEXT,
         is_synced INTEGER NOT NULL DEFAULT 0,
+        pre_day_notify INTEGER NOT NULL DEFAULT 0, -- NEW: per-task pre-day toggle
         FOREIGN KEY (calendar_id) REFERENCES calendars (id) ON DELETE CASCADE
       )
     ''');
@@ -111,6 +116,23 @@ class DatabaseService {
         FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
       )
     ''');
+  }
+
+  // NEW: add column pre_day_notify for existing DBs
+  Future<void> _ensureTaskPreDayColumn(Database db) async {
+    try {
+      final cols = await db.rawQuery('PRAGMA table_info(tasks)');
+      final hasCol = cols.any(
+        (c) => (c['name'] as String?) == 'pre_day_notify',
+      );
+      if (!hasCol) {
+        await db.execute(
+          'ALTER TABLE tasks ADD COLUMN pre_day_notify INTEGER NOT NULL DEFAULT 0',
+        );
+      }
+    } catch (_) {
+      // ignore
+    }
   }
 
   // Hàm tiện ích để xóa toàn bộ dữ liệu khi người dùng đăng xuất

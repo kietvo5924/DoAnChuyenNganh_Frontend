@@ -22,6 +22,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../auth/pages/auth_wrapper.dart';
 import 'package:planmate_app/core/services/navigation_service.dart';
 import 'package:planmate_app/data/auth/repositories/auth_repository_impl.dart';
+import 'package:planmate_app/core/services/notification_service.dart';
 
 class AppDrawer extends StatelessWidget {
   const AppDrawer({super.key});
@@ -132,8 +133,12 @@ class AppDrawer extends StatelessWidget {
                 ListTile(
                   leading: const Icon(Icons.login),
                   title: const Text('Đăng nhập'),
-                  onTap: () =>
-                      context.read<AuthBloc>().add(GuestWantsToLogin()),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    // NEW: clear notifications set in guest mode before switching to login
+                    await getIt<NotificationService>().cancelAllNotifications();
+                    context.read<AuthBloc>().add(GuestWantsToLogin());
+                  },
                 ),
               ],
             ],
@@ -146,6 +151,8 @@ class AppDrawer extends StatelessWidget {
 
 Future<void> _handleSignOutFlow(BuildContext context) async {
   print('[SignOutFlow] START');
+  // NEW: cancel all local notifications on sign out (guest or logged)
+  await getIt<NotificationService>().cancelAllNotifications();
   final nav = NavigationService.navigatorKey.currentState;
   final db = await getIt<DatabaseService>().database;
 

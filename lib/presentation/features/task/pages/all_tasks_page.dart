@@ -105,6 +105,42 @@ class _AllTasksPageState extends State<AllTasksPage> {
     );
   }
 
+  String _buildStartDisplay(TaskEntity task) {
+    // CHANGED: and add debug
+    if (task.repeatType == RepeatType.NONE) {
+      final d = (task.startTime ?? task.sortDate).toLocal();
+      final txt = (task.isAllDay == true)
+          ? DateFormat('dd/MM/yyyy').format(d)
+          : DateFormat('HH:mm dd/MM/yyyy').format(d);
+      print(
+        '[AllTasks][DBG] task=${task.id} single isAllDay=${task.isAllDay} start="$txt"',
+      );
+      return txt;
+    } else {
+      final base = (task.repeatStart ?? task.sortDate).toLocal();
+      final tod = task.repeatStartTime;
+      if (tod == null) {
+        final txt = DateFormat('dd/MM/yyyy').format(base);
+        print(
+          '[AllTasks][DBG] task=${task.id} recurring tod=null display="$txt"',
+        );
+        return txt;
+      }
+      final dt = DateTime(
+        base.year,
+        base.month,
+        base.day,
+        tod.hour,
+        tod.minute,
+      );
+      final txt = DateFormat('HH:mm dd/MM/yyyy').format(dt);
+      print(
+        '[AllTasks][DBG] task=${task.id} recurring tod=${tod.hour}:${tod.minute} display="$txt"',
+      );
+      return txt;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -123,7 +159,10 @@ class _AllTasksPageState extends State<AllTasksPage> {
                   final taskWithCalendar = state.tasks[index];
                   final task = taskWithCalendar.task;
                   final calendar = taskWithCalendar.calendar;
-                  final displayDate = task.sortDate;
+
+                  // CHANGED: build display text correctly
+                  final startStr = _buildStartDisplay(task);
+
                   return ListTile(
                     leading: Icon(
                       task.repeatType == RepeatType.NONE
@@ -132,7 +171,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
                     ),
                     title: Text(task.title),
                     subtitle: Text(
-                      'Lịch: ${calendar.name} • Bắt đầu: ${DateFormat('HH:mm dd/MM/yyyy').format(displayDate.toLocal())}',
+                      'Lịch: ${calendar.name} • Bắt đầu: $startStr',
                     ),
                     onTap: () {
                       Navigator.push(
