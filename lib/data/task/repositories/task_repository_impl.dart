@@ -2,10 +2,14 @@ import 'dart:convert';
 import 'package:dartz/dartz.dart';
 import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
+import 'package:planmate_app/core/services/database_service.dart';
 import 'package:planmate_app/data/sync/datasources/sync_queue_local_data_source.dart';
 import 'package:planmate_app/data/sync/models/sync_queue_item_model.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // NEW
 import 'package:planmate_app/data/auth/repositories/auth_repository_impl.dart'; // NEW kAuthTokenKey
+import 'package:planmate_app/core/services/notification_service.dart'; // NEW
+import 'package:planmate_app/injection.dart'; // NEW to access DatabaseService
+import 'package:planmate_app/domain/notification/usecases/reschedule_all_notifications.dart'; // NEW
 import '../../../core/error/failures.dart';
 import '../../../core/network/network_info.dart';
 import '../../../domain/calendar/repositories/calendar_repository.dart';
@@ -22,6 +26,7 @@ class TaskRepositoryImpl implements TaskRepository {
   final NetworkInfo networkInfo;
   final SyncQueueLocalDataSource syncQueueLocalDataSource;
   final SharedPreferences _prefs; // NEW
+  final NotificationService notificationService; // NEW
 
   TaskRepositoryImpl({
     required this.remoteDataSource,
@@ -30,6 +35,7 @@ class TaskRepositoryImpl implements TaskRepository {
     required this.networkInfo,
     required this.syncQueueLocalDataSource,
     required SharedPreferences prefs, // NEW
+    required this.notificationService, // NEW
   }) : _prefs = prefs; // NEW
 
   bool _hasToken() {
@@ -40,6 +46,60 @@ class TaskRepositoryImpl implements TaskRepository {
   bool _isAuthRedirectOrUnauthorized(DioException e) {
     final c = e.response?.statusCode;
     return c == 302 || c == 401 || c == 403;
+  }
+
+  DateTime? _computeScheduleTime(
+    TaskEntity task, {
+    int remindBeforeMinutes = 15, // CHANGED: back to 15 minutes
+  }) {
+    try {
+      if (task.repeatType == RepeatType.NONE) {
+        if (task.startTime == null) return null;
+        return task.startTime!.toLocal().subtract(
+          Duration(minutes: remindBeforeMinutes),
+        );
+      } else {
+        if (task.repeatStart == null || task.repeatStartTime == null)
+          return null;
+        final dt = DateTime(
+          task.repeatStart!.year,
+          task.repeatStart!.month,
+          task.repeatStart!.day,
+          task.repeatStartTime!.hour,
+          task.repeatStartTime!.minute,
+        );
+        return dt.subtract(Duration(minutes: remindBeforeMinutes));
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _scheduleForTask(TaskEntity task, int localId) async {
+    final taskForSchedule = TaskEntity(
+      id: localId.abs(),
+      title: task.title,
+      description: task.description,
+      calendarId: task.calendarId,
+      tags: task.tags,
+      repeatType: task.repeatType,
+      startTime: task.startTime,
+      endTime: task.endTime,
+      isAllDay: task.isAllDay,
+      repeatStartTime: task.repeatStartTime,
+      repeatEndTime: task.repeatEndTime,
+      timezone: task.timezone,
+      repeatInterval: task.repeatInterval,
+      repeatDays: task.repeatDays,
+      repeatDayOfMonth: task.repeatDayOfMonth,
+      repeatWeekOfMonth: task.repeatWeekOfMonth,
+      repeatDayOfWeek: task.repeatDayOfWeek,
+      repeatStart: task.repeatStart,
+      repeatEnd: task.repeatEnd,
+      exceptions: task.exceptions,
+      preDayNotify: task.preDayNotify, // NEW
+    );
+    await notificationService.scheduleForTaskEntity(taskForSchedule);
   }
 
   @override
@@ -95,6 +155,10 @@ class TaskRepositoryImpl implements TaskRepository {
         }
       }
       await localDataSource.cacheTasks(allRemote);
+
+      // NEW: reschedule all notifications via use case
+      await getIt<RescheduleAllNotifications>()(); // CHANGED
+
       return Right(unit);
     } catch (e) {
       if (e is DioException) {
@@ -180,7 +244,7 @@ class TaskRepositoryImpl implements TaskRepository {
           .millisecondsSinceEpoch; // temp negative id for offline create
     }
     final taskModelToSave = TaskModel(
-      id: localId, // CHANGED
+      id: localId,
       title: task.title,
       description: task.description,
       tags: task.tags,
@@ -200,8 +264,13 @@ class TaskRepositoryImpl implements TaskRepository {
       repeatStart: task.repeatStart,
       repeatEnd: task.repeatEnd,
       exceptions: task.exceptions,
+      preDayNotify: task.preDayNotify, // NEW
     );
     await localDataSource.saveTask(taskModelToSave, isSynced: false);
+
+    // CHANGED: cancel block then schedule (recurring aware)
+    await notificationService.cancelTaskNotifications(localId.abs());
+    await _scheduleForTask(task, localId);
 
     // NEW: push UPSERT action with payload
     final payload = jsonEncode({
@@ -233,6 +302,8 @@ class TaskRepositoryImpl implements TaskRepository {
       try {
         await remoteDataSource.deleteTask(taskId: taskId, type: type);
         await localDataSource.deleteTask(taskId);
+        // CHANGED: cancel whole block
+        await notificationService.cancelTaskNotifications(taskId.abs());
         return Right(unit);
       } on DioException catch (e) {
         if (_isAuthRedirectOrUnauthorized(e)) {
@@ -262,6 +333,7 @@ class TaskRepositoryImpl implements TaskRepository {
     }
     // offline hoặc guest
     await localDataSource.deleteTask(taskId);
+    await notificationService.cancelTaskNotifications(taskId.abs());
     await syncQueueLocalDataSource.addAction(
       SyncQueueItemModel(
         entityType: 'TASK',

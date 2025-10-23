@@ -26,6 +26,7 @@ class SaveTaskSubmitted extends TaskEditorEvent {
   final int? repeatDayOfMonth;
   final DateTime repeatStart;
   final DateTime? repeatEnd;
+  final bool preDayNotify; // NEW
 
   const SaveTaskSubmitted({
     this.taskId,
@@ -44,6 +45,7 @@ class SaveTaskSubmitted extends TaskEditorEvent {
     this.repeatDayOfMonth,
     required this.repeatStart,
     this.repeatEnd,
+    this.preDayNotify = false, // NEW default
   });
 }
 

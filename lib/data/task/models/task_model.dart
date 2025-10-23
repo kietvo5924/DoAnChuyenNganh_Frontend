@@ -28,6 +28,7 @@ class TaskModel extends TaskEntity {
     DateTime? repeatStart,
     DateTime? repeatEnd,
     String? exceptions,
+    bool? preDayNotify, // NEW
   }) : super(
          id: id,
          title: title,
@@ -49,12 +50,17 @@ class TaskModel extends TaskEntity {
          repeatStart: repeatStart,
          repeatEnd: repeatEnd,
          exceptions: exceptions,
+         preDayNotify: preDayNotify, // NEW
        );
 
   static TimeOfDay? _parseTime(String? timeStr) {
-    if (timeStr == null) return null;
+    // CHANGED: robust parse for "HH:mm" or "HH:mm:ss"
+    if (timeStr == null || timeStr.trim().isEmpty) return null;
     final parts = timeStr.split(':');
-    return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+    if (parts.length < 2) return null;
+    final h = int.tryParse(parts[0].trim()) ?? 0;
+    final m = int.tryParse(parts[1].trim()) ?? 0;
+    return TimeOfDay(hour: h.clamp(0, 23), minute: m.clamp(0, 59));
   }
 
   static RepeatType _parseRepeatType(String typeStr) {
@@ -159,6 +165,10 @@ class TaskModel extends TaskEntity {
           : null,
       exceptions: json['exceptions'],
       tags: parsedTags, // CHANGED
+      // NEW: backend may not send -> null (handled locally)
+      preDayNotify: (json['preDayNotify'] is bool)
+          ? json['preDayNotify'] as bool
+          : null,
     );
   }
 
@@ -192,6 +202,7 @@ class TaskModel extends TaskEntity {
           : null,
       exceptions: map['exceptions'],
       tags: tags,
+      preDayNotify: ((map['pre_day_notify'] as int?) ?? 0) == 1, // NEW
     );
   }
 
@@ -207,11 +218,12 @@ class TaskModel extends TaskEntity {
       'end_time': endTime?.toIso8601String(),
       'is_all_day': isAllDay == true ? 1 : 0,
       // Trường cho task lặp lại
+      // CHANGED: always persist zero-padded "HH:mm"
       'repeat_start_time': repeatStartTime != null
-          ? '${repeatStartTime!.hour}:${repeatStartTime!.minute}'
+          ? '${repeatStartTime!.hour.toString().padLeft(2, '0')}:${repeatStartTime!.minute.toString().padLeft(2, '0')}'
           : null,
       'repeat_end_time': repeatEndTime != null
-          ? '${repeatEndTime!.hour}:${repeatEndTime!.minute}'
+          ? '${repeatEndTime!.hour.toString().padLeft(2, '0')}:${repeatEndTime!.minute.toString().padLeft(2, '0')}'
           : null,
       'timezone': timezone,
       'repeat_interval': repeatInterval,
@@ -222,7 +234,8 @@ class TaskModel extends TaskEntity {
       'repeat_start': repeatStart?.toIso8601String(),
       'repeat_end': repeatEnd?.toIso8601String(),
       'exceptions': exceptions,
-      'is_synced': 1, // Mặc định là đã đồng bộ khi cache
+      'is_synced': 1,
+      'pre_day_notify': (preDayNotify == true) ? 1 : 0, // NEW
     };
   }
 }
