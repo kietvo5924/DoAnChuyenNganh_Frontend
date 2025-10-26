@@ -79,6 +79,7 @@ class TaskModel extends TaskEntity {
       parsedTags = rawTags
           .map((tagJson) {
             if (tagJson is Map) {
+              // ignore: unnecessary_cast
               final map = Map<String, dynamic>.from(tagJson as Map);
               // chấp nhận cả key 'tagId'
               final id = map['id'] ?? map['tagId'];

@@ -11,6 +11,7 @@ class NetworkInfoImpl implements NetworkInfo {
   @override
   Future<bool> get isConnected async {
     final raw = await connectivity.checkConnectivity();
+    // ignore: unnecessary_type_check
     final List<ConnectivityResult> results = raw is List<ConnectivityResult>
         ? raw
         : [raw as ConnectivityResult];

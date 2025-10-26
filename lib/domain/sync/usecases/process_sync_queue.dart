@@ -30,6 +30,7 @@ class ProcessSyncQueue {
   });
 
   @override
+  // ignore: override_on_non_overriding_member
   Future<Either<Failure, Unit>> call() async {
     // NEW: prune duplicates so only the latest action per key remains
     await localDataSource.pruneDuplicates();

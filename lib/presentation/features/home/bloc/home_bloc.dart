@@ -2,19 +2,19 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../domain/calendar/entities/calendar_entity.dart';
 import '../../../../domain/calendar/usecases/get_local_calendars.dart';
 import '../../../../domain/task/usecases/get_local_tasks_in_calendar.dart';
-import '../../../../domain/task/usecases/get_all_local_tasks.dart'; // NEW
+import '../../../../domain/task/usecases/get_all_local_tasks.dart';
 import 'home_event.dart';
 import 'home_state.dart';
 
 class HomeBloc extends Bloc<HomeEvent, HomeState> {
   final GetLocalCalendars _getLocalCalendars;
   final GetLocalTasksInCalendar _getLocalTasksInCalendar;
-  final GetAllLocalTasks? _getAllLocalTasksOpt; // NEW (optional injected)
+  final GetAllLocalTasks? _getAllLocalTasksOpt;
 
   HomeBloc({
     required GetLocalCalendars getLocalCalendars,
     required GetLocalTasksInCalendar getLocalTasksInCalendar,
-    GetAllLocalTasks? getAllLocalTasks, // NEW optional param
+    GetAllLocalTasks? getAllLocalTasks,
   }) : _getLocalCalendars = getLocalCalendars,
        _getLocalTasksInCalendar = getLocalTasksInCalendar,
        _getAllLocalTasksOpt = getAllLocalTasks,

@@ -2,14 +2,13 @@ import 'dart:convert';
 import 'package:dartz/dartz.dart';
 import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
-import 'package:planmate_app/core/services/database_service.dart';
 import 'package:planmate_app/data/sync/datasources/sync_queue_local_data_source.dart';
 import 'package:planmate_app/data/sync/models/sync_queue_item_model.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // NEW
-import 'package:planmate_app/data/auth/repositories/auth_repository_impl.dart'; // NEW kAuthTokenKey
-import 'package:planmate_app/core/services/notification_service.dart'; // NEW
-import 'package:planmate_app/injection.dart'; // NEW to access DatabaseService
-import 'package:planmate_app/domain/notification/usecases/reschedule_all_notifications.dart'; // NEW
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:planmate_app/data/auth/repositories/auth_repository_impl.dart';
+import 'package:planmate_app/core/services/notification_service.dart';
+import 'package:planmate_app/injection.dart';
+import 'package:planmate_app/domain/notification/usecases/reschedule_all_notifications.dart';
 import '../../../core/error/failures.dart';
 import '../../../core/network/network_info.dart';
 import '../../../domain/calendar/repositories/calendar_repository.dart';
@@ -48,6 +47,7 @@ class TaskRepositoryImpl implements TaskRepository {
     return c == 302 || c == 401 || c == 403;
   }
 
+  // ignore: unused_element
   DateTime? _computeScheduleTime(
     TaskEntity task, {
     int remindBeforeMinutes = 15, // CHANGED: back to 15 minutes
