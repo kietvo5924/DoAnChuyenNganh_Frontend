@@ -73,13 +73,20 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
   bool _preDayNotify = false; // NEW: per-task toggle
 
   // NEW: Global notification preferences (applies to all tasks)
+  // ignore: unused_field
   final _leadMinutesCtl = TextEditingController(text: '15');
+  // ignore: unused_field
   bool _preDayEnabled = true;
+  // ignore: unused_field
   TimeOfDay _preDayTime = const TimeOfDay(hour: 18, minute: 0);
 
+  // ignore: unused_field
   static const _kLeadMinutesKey = 'notify_lead_minutes';
+  // ignore: unused_field
   static const _kPreDayEnabledKey = 'notify_preday_enabled';
+  // ignore: unused_field
   static const _kPreDayHourKey = 'notify_preday_hour';
+  // ignore: unused_field
   static const _kPreDayMinuteKey = 'notify_preday_minute';
 
   @override
@@ -196,6 +203,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
   }
 
   // NEW: chỉ cố gắng lấy metadata tag từ local nếu tên trống (không gọi remote)
+  // ignore: unused_element
   Future<void> _resolveTagsLocally() async {
     if (_selectedTags.isEmpty) return;
     final need = _selectedTags.any((t) => t.name.isEmpty);

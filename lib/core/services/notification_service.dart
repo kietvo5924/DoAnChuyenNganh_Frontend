@@ -33,11 +33,14 @@ class NotificationService {
   Future<int> _leadMinutes() async =>
       getIt<SharedPreferences>().getInt(_kLeadMinutesKey) ??
       _defaultLeadMinutes;
+  // ignore: unused_element
   Future<bool> _preDayEnabled() async =>
       getIt<SharedPreferences>().getBool(_kPreDayEnabledKey) ??
       true; // NOT USED ANYMORE
+  // ignore: unused_element
   Future<int> _preDayHour() async =>
       getIt<SharedPreferences>().getInt(_kPreDayHourKey) ?? _defaultPreDayHour;
+  // ignore: unused_element
   Future<int> _preDayMinute() async =>
       getIt<SharedPreferences>().getInt(_kPreDayMinuteKey) ??
       _defaultPreDayMinute;

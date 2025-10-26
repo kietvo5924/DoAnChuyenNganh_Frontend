@@ -7,7 +7,6 @@ import '../../../../domain/user/usecases/get_cached_user.dart';
 import '../../../../domain/sync/usecases/merge_guest_data.dart'; // NEW
 import '../../../../domain/sync/usecases/process_sync_queue.dart';
 import '../../../../domain/sync/usecases/upload_guest_data.dart'; // NEW
-import '../../../../injection.dart';
 import 'sync_event.dart';
 import 'sync_state.dart';
 
