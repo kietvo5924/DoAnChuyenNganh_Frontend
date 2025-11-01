@@ -1,3 +1,4 @@
+// lib/presentation/features/calendar/pages/calendar_management_page.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:planmate_app/presentation/features/home/bloc/home_bloc.dart';
@@ -18,19 +19,34 @@ class CalendarManagementPage extends StatefulWidget {
   State<CalendarManagementPage> createState() => _CalendarManagementPageState();
 }
 
-class _CalendarManagementPageState extends State<CalendarManagementPage> {
-  List<CalendarEntity> _cachedCalendars = [];
+class _CalendarManagementPageState extends State<CalendarManagementPage>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  // Cache riêng cho 2 danh sách
+  List<CalendarEntity> _myCalendars = [];
+  List<CalendarEntity> _sharedCalendars = [];
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    // Fetch cả 2 loại lịch khi vào trang
     context.read<CalendarBloc>().add(FetchCalendars());
+    context.read<CalendarBloc>().add(FetchSharedWithMeCalendars());
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   void _showDeleteConfirmationDialog(BuildContext context, int calendarId) {
-    // NEW: guard trước khi mở dialog
-    final list = _cachedCalendars;
-    if (list.length <= 1) {
+    // SỬA LỖI: Dùng cache _myCalendars thay vì state
+    final listToCheck = _myCalendars;
+
+    if (listToCheck.length <= 1) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Không thể xóa bộ lịch cuối cùng của bạn.'),
@@ -40,9 +56,8 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
       return;
     }
 
-    // CHANGED: dùng indexWhere để tránh lỗi kiểu generic với orElse
-    final idx = list.indexWhere((c) => c.id == calendarId);
-    final cal = idx >= 0 ? list[idx] : null;
+    final idx = listToCheck.indexWhere((c) => c.id == calendarId);
+    final cal = idx >= 0 ? listToCheck[idx] : null;
     if (cal == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -94,7 +109,16 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Quản lý Lịch')),
+      appBar: AppBar(
+        title: const Text('Quản lý Lịch'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Lịch của tôi'),
+            Tab(text: 'Được chia sẻ'),
+          ],
+        ),
+      ),
       body: BlocListener<CalendarBloc, CalendarState>(
         listener: (context, state) {
           if (state is CalendarOperationSuccess) {
@@ -104,6 +128,10 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
                 backgroundColor: Colors.green,
               ),
             );
+            // Fetch lại cả 2 danh sách khi có thao tác thành công
+            context.read<CalendarBloc>().add(FetchCalendars());
+            context.read<CalendarBloc>().add(FetchSharedWithMeCalendars());
+            // Cập nhật home và tasks
             context.read<HomeBloc>().add(FetchHomeData());
             context.read<AllTasksBloc>().add(FetchAllTasks());
           } else if (state is CalendarError) {
@@ -117,99 +145,34 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
         },
         child: BlocBuilder<CalendarBloc, CalendarState>(
           builder: (context, state) {
+            // Cập nhật cache khi state thay đổi
+            // SỬA ĐỔI QUAN TRỌNG:
             if (state is CalendarLoaded) {
-              _cachedCalendars = state.calendars;
+              _myCalendars = state.calendars; // Đọc từ state.calendars
+            } else if (state is CalendarSharedWithMeLoaded) {
+              _sharedCalendars = state.calendars; // Đọc từ state.calendars
             }
 
             final isBusy =
                 state is CalendarLoading ||
                 state is CalendarOperationInProgress;
 
-            if (_cachedCalendars.isEmpty && state is! CalendarLoaded) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            if (_cachedCalendars.isEmpty) {
-              return const Center(child: Text('Bạn chưa có lịch nào.'));
-            }
-
-            final listView = RefreshIndicator(
-              onRefresh: () async {
-                context.read<CalendarBloc>().add(
-                  FetchCalendars(forceRemote: true),
-                );
-              },
-              child: ListView.builder(
-                itemCount: _cachedCalendars.length,
-                itemBuilder: (context, index) {
-                  final calendar = _cachedCalendars[index];
-                  return ListTile(
-                    leading: const Icon(Icons.calendar_today_outlined),
-                    title: Text(calendar.name),
-                    subtitle: Text(
-                      calendar.description ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              CalendarDetailPage(calendar: calendar),
-                        ),
-                      );
-                    },
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (calendar.isDefault)
-                          const Icon(Icons.star, color: Colors.amber)
-                        else
-                          IconButton(
-                            tooltip: 'Đặt làm mặc định',
-                            icon: const Icon(Icons.star_border_outlined),
-                            onPressed: () => context.read<CalendarBloc>().add(
-                              SetDefaultCalendarSubmitted(
-                                calendarId: calendar.id,
-                              ),
-                            ),
-                          ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.edit_outlined,
-                            color: Colors.grey,
-                          ),
-                          tooltip: 'Sửa',
-                          onPressed: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  EditCalendarPage(calendar: calendar),
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.delete_outline,
-                            color: Colors.grey,
-                          ),
-                          tooltip: 'Xóa',
-                          onPressed: () => _showDeleteConfirmationDialog(
-                            context,
-                            calendar.id,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            );
-
             return Stack(
               children: [
-                listView,
+                TabBarView(
+                  controller: _tabController,
+                  children: [
+                    // Tab 1: Lịch của tôi (dùng cache _myCalendars)
+                    _buildMyCalendarsList(context, _myCalendars, isBusy, state),
+                    // Tab 2: Lịch được chia sẻ (dùng cache _sharedCalendars)
+                    _buildSharedCalendarsList(
+                      context,
+                      _sharedCalendars,
+                      isBusy,
+                      state,
+                    ),
+                  ],
+                ),
                 if (isBusy)
                   Positioned.fill(
                     child: Container(
@@ -234,6 +197,132 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
           MaterialPageRoute(builder: (_) => const AddCalendarPage()),
         ),
         child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  // Widget cho Tab "Lịch của tôi"
+  Widget _buildMyCalendarsList(
+    BuildContext context,
+    List<CalendarEntity> calendars,
+    bool isBusy,
+    CalendarState state,
+  ) {
+    if (calendars.isEmpty && !isBusy && state is! CalendarLoading) {
+      return const Center(child: Text('Bạn chưa có lịch nào.'));
+    }
+
+    if (calendars.isEmpty && state is CalendarLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        context.read<CalendarBloc>().add(FetchCalendars(forceRemote: true));
+      },
+      child: ListView.builder(
+        itemCount: calendars.length,
+        itemBuilder: (context, index) {
+          final calendar = calendars[index];
+          return ListTile(
+            leading: const Icon(Icons.calendar_today_outlined),
+            title: Text(calendar.name),
+            subtitle: Text(
+              calendar.description ?? '',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CalendarDetailPage(calendar: calendar),
+                ),
+              );
+            },
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (calendar.isDefault)
+                  const Icon(Icons.star, color: Colors.amber)
+                else
+                  IconButton(
+                    tooltip: 'Đặt làm mặc định',
+                    icon: const Icon(Icons.star_border_outlined),
+                    onPressed: () => context.read<CalendarBloc>().add(
+                      SetDefaultCalendarSubmitted(calendarId: calendar.id),
+                    ),
+                  ),
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined, color: Colors.grey),
+                  tooltip: 'Sửa',
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EditCalendarPage(calendar: calendar),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.grey),
+                  tooltip: 'Xóa',
+                  onPressed: () =>
+                      _showDeleteConfirmationDialog(context, calendar.id),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // Widget cho Tab "Được chia sẻ"
+  Widget _buildSharedCalendarsList(
+    BuildContext context,
+    List<CalendarEntity> calendars,
+    bool isBusy,
+    CalendarState state,
+  ) {
+    if (calendars.isEmpty && !isBusy && state is! CalendarLoading) {
+      return const Center(
+        child: Text('Chưa có lịch nào được chia sẻ với bạn.'),
+      );
+    }
+
+    if (calendars.isEmpty && state is CalendarLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        context.read<CalendarBloc>().add(FetchSharedWithMeCalendars());
+      },
+      child: ListView.builder(
+        itemCount: calendars.length,
+        itemBuilder: (context, index) {
+          final calendar = calendars[index];
+          return ListTile(
+            leading: Icon(
+              Icons.folder_shared_outlined,
+              color: Theme.of(context).primaryColor,
+            ),
+            title: Text(calendar.name),
+            subtitle: Text(
+              calendar.description ?? '',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CalendarDetailPage(calendar: calendar),
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }

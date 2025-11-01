@@ -164,141 +164,149 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
   @override
   Future<void> cacheTasks(List<TaskModel> tasks) async {
     final db = await dbService.database;
-    await db.transaction((txn) async {
-      await txn.execute('PRAGMA foreign_keys = ON');
-      await _ensureTagMetaColumns(txn);
 
-      // Thu thập tag
-      final Map<int, TagModel> allTags = {};
-      for (final task in tasks) {
-        for (final tag in task.tags) {
-          allTags.putIfAbsent(tag.id, () {
-            if (tag is TagModel) return tag;
-            return TagModel(id: tag.id, name: tag.name, color: tag.color);
-          });
-        }
-      }
-      // CHANGED: update-first, then insert IGNORE (tránh REPLACE gây cascade)
-      for (final tag in allTags.values) {
-        final updated = await txn.update(
-          'tags',
-          {'name': tag.name, 'color': tag.color, 'is_synced': 1},
-          where: 'id = ?',
-          whereArgs: [tag.id],
-        );
-        if (updated == 0) {
-          await txn.insert('tags', {
-            'id': tag.id,
-            'name': tag.name,
-            'color': tag.color,
-            'is_synced': 1,
-          }, conflictAlgorithm: ConflictAlgorithm.ignore);
-        }
-      }
+    // NEW: disable FK at connection-level for the whole cache operation
+    await db.execute('PRAGMA foreign_keys = OFF');
+    try {
+      await db.transaction((txn) async {
+        await txn.execute(
+          'PRAGMA foreign_keys = ON',
+        ); // keep FK ON inside txn for other tables
+        await _ensureTagMetaColumns(txn);
 
-      int totalMappingInserted = 0;
-
-      for (final task in tasks) {
-        try {
-          final rawIds = task.tags.map((e) => e.id).toList();
-          final rawMeta = task.tags
-              .map(
-                (e) => {
-                  'id': e.id,
-                  'name': (e is TagModel) ? e.name : e.name,
-                  'color': (e is TagModel) ? e.color : e.color,
-                },
-              )
-              .toList();
-
-          final taskMap = task.toDbMap()
-            ..['is_synced'] = 1
-            ..['raw_tag_ids'] =
-                jsonEncode(rawIds) // CHANGED
-            ..['raw_tag_meta'] = jsonEncode(rawMeta); // NEW
-
-          // NEW: preserve existing pre_day_notify if remote didn’t provide
-          if (task.preDayNotify == null) {
-            final existing = await txn.query(
-              _taskTable,
-              columns: ['pre_day_notify'],
-              where: 'id = ?',
-              whereArgs: [task.id],
-              limit: 1,
-            );
-            if (existing.isNotEmpty) {
-              taskMap['pre_day_notify'] = existing.first['pre_day_notify'];
-            }
-          }
-
-          await txn.insert(
-            _taskTable,
-            taskMap,
-            conflictAlgorithm: ConflictAlgorithm.replace,
-          );
-
-          final deleted = await txn.delete(
-            _taskTagTable,
-            where: 'task_id = ?',
-            whereArgs: [task.id],
-          );
-          if (deleted > 0) {
-            // silent
-          }
-
-          // Insert mapping (OR REPLACE để chắc chắn)
-          int localInserted = 0;
+        // Thu thập tag
+        final Map<int, TagModel> allTags = {};
+        for (final task in tasks) {
           for (final tag in task.tags) {
-            try {
-              await txn.insert(_taskTagTable, {
-                'task_id': task.id,
-                'tag_id': tag.id,
-              }, conflictAlgorithm: ConflictAlgorithm.replace);
-              localInserted++;
-            } catch (e) {
-              print(
-                '[TaskLocal][MAP-ERR] task=${task.id} tag=${tag.id} err=$e',
-              );
-            }
+            allTags.putIfAbsent(tag.id, () {
+              if (tag is TagModel) return tag;
+              return TagModel(id: tag.id, name: tag.name, color: tag.color);
+            });
           }
-          totalMappingInserted += localInserted;
-
-          // Verify
-          final count =
-              Sqflite.firstIntValue(
-                await txn.rawQuery(
-                  'SELECT COUNT(*) FROM $_taskTagTable WHERE task_id = ?',
-                  [task.id],
-                ),
-              ) ??
-              0;
-
-          if (count == 0 && task.tags.isNotEmpty) {
-            print(
-              '[TaskLocal][WARN] Mapping still empty after insert for task=${task.id}, attempting rebuild from raw_tag_ids',
-            );
-            final rebuilt = await _rebuildMappingsFromRawTagIds(txn, task.id);
-            totalMappingInserted += rebuilt;
-            if (rebuilt == 0) {
-              print(
-                '[TaskLocal][FATAL] Cannot create mappings for task=${task.id} (tag ids=${task.tags.map((e) => e.id).toList()})',
-              );
-            }
-          } else {
-            print(
-              '[TaskLocal] task=${task.id} mappingCount=$count (expected=${task.tags.length})',
-            );
-          }
-        } catch (e) {
-          print('[TaskLocal][ERROR] cache task id=${task.id}: $e');
         }
-      }
+        // CHANGED: update-first, then insert IGNORE (tránh REPLACE gây cascade)
+        for (final tag in allTags.values) {
+          final updated = await txn.update(
+            'tags',
+            {'name': tag.name, 'color': tag.color, 'is_synced': 1},
+            where: 'id = ?',
+            whereArgs: [tag.id],
+          );
+          if (updated == 0) {
+            await txn.insert('tags', {
+              'id': tag.id,
+              'name': tag.name,
+              'color': tag.color,
+              'is_synced': 1,
+            }, conflictAlgorithm: ConflictAlgorithm.ignore);
+          }
+        }
 
-      print(
-        '[TaskLocal] Upserted ${tasks.length} task(s); total tagMappings=$totalMappingInserted',
-      );
-      await _logCurrentMappings(txn);
-    });
+        int totalMappingInserted = 0;
+
+        for (final task in tasks) {
+          try {
+            // KEEP: no placeholder calendar creation
+            final rawIds = task.tags.map((e) => e.id).toList();
+            final rawMeta = task.tags
+                .map(
+                  (e) => {
+                    'id': e.id,
+                    'name': (e is TagModel) ? e.name : e.name,
+                    'color': (e is TagModel) ? e.color : e.color,
+                  },
+                )
+                .toList();
+
+            final taskMap = task.toDbMap()
+              ..['is_synced'] = 1
+              ..['raw_tag_ids'] = jsonEncode(rawIds)
+              ..['raw_tag_meta'] = jsonEncode(rawMeta);
+
+            // NEW: preserve existing pre_day_notify if remote didn’t provide
+            if (task.preDayNotify == null) {
+              final existing = await txn.query(
+                _taskTable,
+                columns: ['pre_day_notify'],
+                where: 'id = ?',
+                whereArgs: [task.id],
+                limit: 1,
+              );
+              if (existing.isNotEmpty) {
+                taskMap['pre_day_notify'] = existing.first['pre_day_notify'];
+              }
+            }
+
+            await txn.insert(
+              _taskTable,
+              taskMap,
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+
+            final deleted = await txn.delete(
+              _taskTagTable,
+              where: 'task_id = ?',
+              whereArgs: [task.id],
+            );
+            if (deleted > 0) {
+              // silent
+            }
+
+            int localInserted = 0;
+            for (final tag in task.tags) {
+              try {
+                await txn.insert(_taskTagTable, {
+                  'task_id': task.id,
+                  'tag_id': tag.id,
+                }, conflictAlgorithm: ConflictAlgorithm.replace);
+                localInserted++;
+              } catch (e) {
+                print(
+                  '[TaskLocal][MAP-ERR] task=${task.id} tag=${tag.id} err=$e',
+                );
+              }
+            }
+            totalMappingInserted += localInserted;
+
+            final count =
+                Sqflite.firstIntValue(
+                  await txn.rawQuery(
+                    'SELECT COUNT(*) FROM $_taskTagTable WHERE task_id = ?',
+                    [task.id],
+                  ),
+                ) ??
+                0;
+
+            if (count == 0 && task.tags.isNotEmpty) {
+              print(
+                '[TaskLocal][WARN] Mapping still empty after insert for task=${task.id}, attempting rebuild from raw_tag_ids',
+              );
+              final rebuilt = await _rebuildMappingsFromRawTagIds(txn, task.id);
+              totalMappingInserted += rebuilt;
+              if (rebuilt == 0) {
+                print(
+                  '[TaskLocal][FATAL] Cannot create mappings for task=${task.id} (tag ids=${task.tags.map((e) => e.id).toList()})',
+                );
+              }
+            } else {
+              print(
+                '[TaskLocal] task=${task.id} mappingCount=$count (expected=${task.tags.length})',
+              );
+            }
+          } catch (e) {
+            print('[TaskLocal][ERROR] cache task id=${task.id}: $e');
+          }
+        }
+
+        print(
+          '[TaskLocal] Upserted ${tasks.length} task(s); total tagMappings=$totalMappingInserted',
+        );
+        await _logCurrentMappings(txn);
+      });
+    } finally {
+      // NEW: re-enable FK after cache completes
+      await db.execute('PRAGMA foreign_keys = ON');
+    }
   }
 
   // NEW: hàm hỗ trợ debug tổng quan sau khi cache
@@ -344,4 +352,7 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
     // nhờ có `ON DELETE CASCADE` trong câu lệnh CREATE TABLE.
     await db.delete(_taskTable, where: 'id = ?', whereArgs: [taskId]);
   }
+
+  // REMOVE: placeholder calendar creator to avoid polluting "Lịch của tôi"
+  // Future<void> _ensureCalendarExists(Transaction txn, int calendarId) async { ... }
 }

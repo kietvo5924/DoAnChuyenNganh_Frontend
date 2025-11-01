@@ -26,7 +26,10 @@ class DatabaseService {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onOpen: (db) async {
-        // NEW: lightweight migrations for existing installs
+        // NEW: purge placeholders safely (do not cascade-delete tasks)
+        await _purgePlaceholderCalendars(db);
+        // Ensure new columns exist for older DBs before any local writes
+        await _ensureCalendarsPermissionColumn(db);
         await _ensureTaskPreDayColumn(db);
       },
     );
@@ -51,6 +54,7 @@ class DatabaseService {
         description TEXT,
         is_default INTEGER NOT NULL DEFAULT 0,
         is_synced INTEGER NOT NULL DEFAULT 0
+        ,permission_level TEXT
       )
     ''');
 
@@ -132,6 +136,37 @@ class DatabaseService {
       }
     } catch (_) {
       // ignore
+    }
+  }
+
+  // NEW: ensure calendars.permission_level column exists for older DBs
+  Future<void> _ensureCalendarsPermissionColumn(Database db) async {
+    try {
+      final cols = await db.rawQuery('PRAGMA table_info(calendars)');
+      final hasCol = cols.any(
+        (c) => (c['name'] as String?) == 'permission_level',
+      );
+      if (!hasCol) {
+        await db.execute(
+          'ALTER TABLE calendars ADD COLUMN permission_level TEXT',
+        );
+      }
+    } catch (_) {
+      // ignore migration failures
+    }
+  }
+
+  // NEW: remove calendars created as placeholders "(Shared #...)"
+  Future<void> _purgePlaceholderCalendars(Database db) async {
+    try {
+      await db.execute('PRAGMA foreign_keys = OFF');
+      await db.delete('calendars', where: "name LIKE '(Shared #%'");
+    } catch (_) {
+      // ignore
+    } finally {
+      try {
+        await db.execute('PRAGMA foreign_keys = ON');
+      } catch (_) {}
     }
   }
 
