@@ -6,11 +6,13 @@ class CalendarModel extends CalendarEntity {
     required String name,
     String? description,
     required bool isDefault,
+    String? permissionLevel,
   }) : super(
          id: id,
          name: name,
          description: description,
          isDefault: isDefault,
+         permissionLevel: permissionLevel,
        );
 
   // NEW: helper parse bool an toàn
@@ -31,6 +33,8 @@ class CalendarModel extends CalendarEntity {
       description: json['description'],
       // CHANGED: nhận cả 'isDefault' và 'default' từ backend
       isDefault: _asBool(json['isDefault'] ?? json['default'] ?? false),
+      // NEW: handle permission field if backend returns it (snake or camel)
+      permissionLevel: json['permission_level'] ?? json['permissionLevel'],
     );
   }
 
@@ -40,6 +44,7 @@ class CalendarModel extends CalendarEntity {
       name: map['name'],
       description: map['description'],
       isDefault: map['is_default'] == 1,
+      permissionLevel: map['permission_level'] as String?,
     );
   }
 
@@ -50,6 +55,7 @@ class CalendarModel extends CalendarEntity {
       'description': description,
       'is_default': isDefault ? 1 : 0,
       'is_synced': isSynced ? 1 : 0,
+      'permission_level': permissionLevel,
     };
   }
 }

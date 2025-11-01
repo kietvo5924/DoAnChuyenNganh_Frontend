@@ -55,3 +55,43 @@ class SetDefaultCalendarSubmitted extends CalendarEvent {
   @override
   List<Object?> get props => [calendarId];
 }
+
+class ShareCalendarRequested extends CalendarEvent {
+  final int calendarId;
+  final String email;
+  final String permissionLevel; // "VIEW_ONLY" hoặc "EDIT"
+  const ShareCalendarRequested({
+    required this.calendarId,
+    required this.email,
+    required this.permissionLevel,
+  });
+  @override
+  List<Object?> get props => [calendarId, email, permissionLevel];
+}
+
+class UnshareCalendarRequested extends CalendarEvent {
+  final int calendarId;
+  final int userId;
+  const UnshareCalendarRequested({
+    required this.calendarId,
+    required this.userId,
+  });
+  @override
+  List<Object?> get props => [calendarId, userId];
+}
+
+class FetchSharingUsers extends CalendarEvent {
+  final int calendarId;
+  const FetchSharingUsers({required this.calendarId});
+  @override
+  List<Object?> get props => [calendarId];
+}
+
+class FetchSharedWithMeCalendars extends CalendarEvent {}
+
+class InitializeCalendarDetail extends CalendarEvent {
+  final CalendarEntity calendar;
+  const InitializeCalendarDetail({required this.calendar});
+  @override
+  List<Object?> get props => [calendar];
+}

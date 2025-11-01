@@ -1,4 +1,5 @@
-import 'dart:async'; // NEW
+// lib/injection.dart
+import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:get_it/get_it.dart';
@@ -8,7 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api/dio_interceptor.dart';
 import 'core/network/network_info.dart';
 import 'core/services/database_service.dart';
-import 'core/services/notification_service.dart'; // NEW
+import 'core/services/notification_service.dart';
 
 // Data Layer
 import 'data/auth/datasources/auth_remote_data_source.dart';
@@ -39,9 +40,17 @@ import 'domain/calendar/usecases/get_local_calendars.dart';
 import 'domain/calendar/usecases/save_calendar.dart';
 import 'domain/calendar/usecases/set_default_calendar.dart';
 import 'domain/calendar/usecases/sync_remote_calendars.dart';
+
+// THÊM MỚI: Imports cho Use Cases chia sẻ
+import 'domain/calendar/usecases/get_calendars_shared_with_me.dart';
+import 'domain/calendar/usecases/get_users_sharing_calendar.dart';
+import 'domain/calendar/usecases/share_calendar.dart';
+import 'domain/calendar/usecases/unshare_calendar.dart';
+// KẾT THÚC THÊM MỚI
+
 import 'domain/sync/usecases/process_sync_queue.dart';
-import 'domain/sync/usecases/merge_guest_data.dart'; // NEW
-import 'domain/sync/usecases/upload_guest_data.dart'; // NEW
+import 'domain/sync/usecases/merge_guest_data.dart';
+import 'domain/sync/usecases/upload_guest_data.dart';
 import 'domain/tag/repositories/tag_repository.dart';
 import 'domain/tag/usecases/delete_tag.dart';
 import 'domain/tag/usecases/get_local_tags.dart';
@@ -57,7 +66,7 @@ import 'domain/user/repositories/user_repository.dart';
 import 'domain/user/usecases/change_password.dart';
 import 'domain/user/usecases/get_cached_user.dart';
 import 'domain/user/usecases/sync_user_profile.dart';
-import 'domain/notification/usecases/reschedule_all_notifications.dart'; // NEW
+import 'domain/notification/usecases/reschedule_all_notifications.dart';
 
 // Presentation Layer (BLoCs)
 import 'presentation/features/auth/bloc/auth_bloc.dart';
@@ -80,8 +89,12 @@ Future<void> configureDependencies() async {
   // == External ==
   final sharedPreferences = await SharedPreferences.getInstance();
   getIt.registerLazySingleton(() => sharedPreferences);
-  getIt.registerLazySingleton(
-    () => Dio()
+  getIt.registerLazySingleton(() {
+    final dio = Dio();
+    // NEW: avoid redirect loops and let client handle 302 as an error
+    dio.options.followRedirects = false;
+    dio.options.maxRedirects = 0;
+    dio
       ..interceptors.add(
         DioInterceptor(sharedPreferences: getIt()),
       ) // Interceptor thêm token
@@ -94,15 +107,15 @@ Future<void> configureDependencies() async {
           responseBody: true,
           error: true,
         ),
-      ),
-  );
+      );
+    return dio;
+  });
   getIt.registerLazySingleton(() => Connectivity());
   getIt.registerLazySingleton<DatabaseService>(() => DatabaseService.instance);
 
   // == Core ==
   getIt.registerLazySingleton<NetworkInfo>(() => NetworkInfoImpl(getIt()));
   getIt.registerLazySingleton<NotificationService>(
-    // NEW
     () => NotificationService.instance,
   );
 
@@ -158,7 +171,7 @@ Future<void> configureDependencies() async {
       localDataSource: getIt(),
       networkInfo: getIt(),
       syncQueueLocalDataSource: getIt(),
-      prefs: getIt(), // NEW
+      prefs: getIt(),
     ),
   );
   getIt.registerLazySingleton<TagRepository>(
@@ -167,7 +180,7 @@ Future<void> configureDependencies() async {
       localDataSource: getIt(),
       networkInfo: getIt(),
       syncQueueLocalDataSource: getIt(),
-      prefs: getIt(), // NEW
+      prefs: getIt(),
     ),
   );
   getIt.registerLazySingleton<TaskRepository>(
@@ -177,8 +190,8 @@ Future<void> configureDependencies() async {
       calendarRepository: getIt(),
       networkInfo: getIt(),
       syncQueueLocalDataSource: getIt(),
-      prefs: getIt(), // NEW
-      notificationService: getIt(), // NEW
+      prefs: getIt(),
+      notificationService: getIt(),
     ),
   );
 
@@ -187,9 +200,7 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(() => SignIn(getIt()));
   getIt.registerLazySingleton(() => SignUp(getIt()));
   getIt.registerLazySingleton(() => SignOut(getIt()));
-  getIt.registerLazySingleton(
-    () => CheckAuthStatus(getIt()),
-  ); // <-- Bổ sung Use Case còn thiếu
+  getIt.registerLazySingleton(() => CheckAuthStatus(getIt()));
 
   // User
   getIt.registerLazySingleton(() => GetCachedUser(getIt()));
@@ -202,6 +213,12 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(() => SaveCalendar(getIt()));
   getIt.registerLazySingleton(() => DeleteCalendar(getIt()));
   getIt.registerLazySingleton(() => SetDefaultCalendar(getIt()));
+  // THÊM MỚI: Đăng ký Use Cases cho chức năng chia sẻ
+  getIt.registerLazySingleton(() => ShareCalendar(getIt()));
+  getIt.registerLazySingleton(() => UnshareCalendar(getIt()));
+  getIt.registerLazySingleton(() => GetUsersSharingCalendar(getIt()));
+  getIt.registerLazySingleton(() => GetCalendarsSharedWithMe(getIt()));
+  // KẾT THÚC THÊM MỚI
 
   // Tag
   getIt.registerLazySingleton(() => GetLocalTags(getIt()));
@@ -221,29 +238,27 @@ Future<void> configureDependencies() async {
     () => ProcessSyncQueue(
       localDataSource: getIt(),
       taskRemoteDataSource: getIt(),
-      taskLocalDataSource: getIt(), // NEW
+      taskLocalDataSource: getIt(),
       calendarRemoteDataSource: getIt(),
       calendarLocalDataSource: getIt(),
       tagRemoteDataSource: getIt(),
       tagLocalDataSource: getIt(),
     ),
   );
-  getIt.registerLazySingleton(
-    () => MergeGuestData(getIt()),
-  ); // NEW (missing before)
+  getIt.registerLazySingleton(() => MergeGuestData(getIt()));
   getIt.registerLazySingleton(
     () => UploadGuestData(
       dbService: getIt(),
       queueDs: getIt(),
       processSyncQueue: getIt(),
     ),
-  ); // NEW
+  );
   getIt.registerLazySingleton(
     () => RescheduleAllNotifications(
       notificationService: getIt(),
       dbService: getIt(),
     ),
-  ); // NEW
+  );
 
   // == BLoCs ==
   getIt.registerFactory(
@@ -251,7 +266,7 @@ Future<void> configureDependencies() async {
       signInUseCase: getIt(),
       signUpUseCase: getIt(),
       signOutUseCase: getIt(),
-      checkAuthStatus: getIt(), // <-- Bổ sung dependency
+      checkAuthStatus: getIt(),
     ),
   );
   getIt.registerFactory(
@@ -261,16 +276,26 @@ Future<void> configureDependencies() async {
       changePassword: getIt(),
     ),
   );
+
+  // THAY ĐỔI: Cập nhật CalendarBloc để nhận các UseCase mới
   getIt.registerFactory(
     () => CalendarBloc(
+      // Các dependencies cũ
       getLocalCalendars: getIt(),
       syncRemoteCalendars: getIt(),
       saveCalendar: getIt(),
       deleteCalendar: getIt(),
       setDefaultCalendar: getIt(),
-      syncAllRemoteTasks: getIt(), // NEW
+      syncAllRemoteTasks: getIt(),
+      // Các dependencies mới cho chức năng chia sẻ
+      shareCalendar: getIt(),
+      unshareCalendar: getIt(),
+      getUsersSharingCalendar: getIt(),
+      getCalendarsSharedWithMe: getIt(),
     ),
   );
+  // KẾT THÚC THAY ĐỔI
+
   getIt.registerFactory(
     () => TagBloc(
       getLocalTags: getIt(),
@@ -283,13 +308,9 @@ Future<void> configureDependencies() async {
     () => TaskListBloc(getLocalTasksInCalendar: getIt(), deleteTask: getIt()),
   );
   getIt.registerFactory(
-    () => TaskEditorBloc(
-      saveTask: getIt(),
-      deleteTask: getIt(), // NEW
-    ),
+    () => TaskEditorBloc(saveTask: getIt(), deleteTask: getIt()),
   );
 
-  // Sửa lại tên Use Case cho khớp
   getIt.registerFactory(
     () =>
         HomeBloc(getLocalCalendars: getIt(), getLocalTasksInCalendar: getIt()),
@@ -297,7 +318,8 @@ Future<void> configureDependencies() async {
   getIt.registerFactory(
     () => AllTasksBloc(
       getLocalCalendars: getIt(),
-      getAllLocalTasks: getIt(), // CHANGED: dùng GetAllLocalTasks
+      getAllLocalTasks: getIt(),
+      getCalendarsSharedWithMe: getIt(),
     ),
   );
   getIt.registerFactory(
@@ -307,33 +329,27 @@ Future<void> configureDependencies() async {
       syncRemoteCalendars: getIt(),
       syncRemoteTags: getIt(),
       syncAllRemoteTasks: getIt(),
-      mergeGuestData: getIt(), // now registered
+      mergeGuestData: getIt(),
       processSyncQueue: getIt(),
       uploadGuestData: getIt(),
     ),
   );
 
-  // NEW: Auto process sync when network is back
+  // Auto process sync when network is back
   if (!_connectivityListenerAttached) {
     _connectivityListenerAttached = true;
     final connectivity = getIt<Connectivity>();
     connectivity.onConnectivityChanged.listen((_) async {
-      // Only run when actually connected
       final connected = await getIt<NetworkInfo>().isConnected;
       if (!connected || _queueSyncRunning) return;
 
       _queueSyncRunning = true;
       try {
-        // 1) Process offline queue
         await getIt<ProcessSyncQueue>()();
-
-        // 2) Refresh locals from remote to reflect latest states
         await getIt<SyncRemoteCalendars>()();
         await getIt<SyncRemoteTags>()();
         await getIt<SyncAllRemoteTasks>()();
-
-        // 3) Reschedule notifications from local DB (NEW)
-        await getIt<RescheduleAllNotifications>()(); // CHANGED
+        await getIt<RescheduleAllNotifications>()();
       } catch (_) {
         // silent
       } finally {

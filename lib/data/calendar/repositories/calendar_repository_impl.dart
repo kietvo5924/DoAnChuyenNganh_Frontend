@@ -3,6 +3,7 @@ import 'package:planmate_app/core/error/failures.dart';
 import 'package:planmate_app/core/network/network_info.dart';
 import 'package:planmate_app/domain/calendar/entities/calendar_entity.dart';
 import 'package:planmate_app/domain/calendar/repositories/calendar_repository.dart';
+import 'package:planmate_app/domain/user/entities/user_entity.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // NEW
 import 'package:dio/dio.dart'; // NEW
 import '../../sync/datasources/sync_queue_local_data_source.dart'; // NEW
@@ -204,6 +205,93 @@ class CalendarRepositoryImpl implements CalendarRepository {
       return Right(unit);
     } catch (e) {
       return Left(ServerFailure());
+    }
+  }
+
+  @override
+  Future<Either<Failure, Unit>> shareCalendar(
+    int calendarId,
+    String email,
+    String permissionLevel,
+  ) async {
+    if (await networkInfo.isConnected && _hasToken()) {
+      try {
+        await remoteDataSource.shareCalendar(
+          calendarId,
+          email,
+          permissionLevel,
+        );
+        return Right(unit);
+      } on DioException catch (e) {
+        // Xử lý lỗi cụ thể, ví dụ người dùng không tồn tại, không có quyền...
+        return Left(ServerFailure(message: e.message));
+      } catch (_) {
+        return Left(ServerFailure());
+      }
+    } else {
+      return Left(NetworkFailure()); // Không thể chia sẻ offline
+    }
+  }
+
+  @override
+  Future<Either<Failure, Unit>> unshareCalendar(
+    int calendarId,
+    int userId,
+  ) async {
+    if (await networkInfo.isConnected && _hasToken()) {
+      try {
+        await remoteDataSource.unshareCalendar(calendarId, userId);
+        return Right(unit);
+      } on DioException catch (e) {
+        return Left(ServerFailure(message: e.message));
+      } catch (_) {
+        return Left(ServerFailure());
+      }
+    } else {
+      return Left(NetworkFailure());
+    }
+  }
+
+  @override
+  Future<Either<Failure, List<UserEntity>>> getUsersSharingCalendar(
+    int calendarId,
+  ) async {
+    if (await networkInfo.isConnected && _hasToken()) {
+      try {
+        // remoteDataSource trả về List<UserModel>, nhưng Repository trả về List<UserEntity>
+        final userModels = await remoteDataSource.getUsersSharingCalendar(
+          calendarId,
+        );
+        // Chuyển đổi UserModel thành UserEntity nếu cần, ở đây giả sử chúng tương thích
+        return Right(userModels);
+      } on DioException catch (e) {
+        return Left(ServerFailure(message: e.message));
+      } catch (_) {
+        return Left(ServerFailure());
+      }
+    } else {
+      // Có thể trả về danh sách rỗng hoặc lỗi tùy logic offline
+      return Left(NetworkFailure());
+    }
+  }
+
+  @override
+  Future<Either<Failure, List<CalendarEntity>>>
+  getCalendarsSharedWithMe() async {
+    if (await networkInfo.isConnected && _hasToken()) {
+      try {
+        final calendarModels = await remoteDataSource
+            .getCalendarsSharedWithMe();
+        // Tương tự, CalendarModel tương thích CalendarEntity
+        return Right(calendarModels);
+      } on DioException catch (e) {
+        return Left(ServerFailure(message: e.message));
+      } catch (_) {
+        return Left(ServerFailure());
+      }
+    } else {
+      // Có thể trả về danh sách rỗng hoặc lỗi tùy logic offline
+      return Left(NetworkFailure());
     }
   }
 }

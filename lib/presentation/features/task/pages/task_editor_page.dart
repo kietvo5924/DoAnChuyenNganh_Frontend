@@ -614,9 +614,9 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
                     ),
                   ),
                 ),
-              _buildTagSelector(),
-              // CHANGED: when repeating, show per-task pre-day toggle instead of global prefs
-              if (_selectedRepeatOption != RepeatOption.none) ...[
+              // Show pre-day notify toggle and tag selector only for personal/owned calendars
+              if ((_selectedCalendar?.permissionLevel ?? '').isEmpty) ...[
+                // Per-task pre-day toggle (always visible for personal calendars)
                 const SizedBox(height: 8),
                 SwitchListTile(
                   title: const Text('Nhắc trước 1 ngày (18:00)'),
@@ -624,6 +624,12 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
                   value: _preDayNotify,
                   onChanged: (v) => setState(() => _preDayNotify = v),
                 ),
+
+                // Tag selector is only editable for personal calendars
+                _buildTagSelector(),
+              ] else ...[
+                // For shared calendars (permissionLevel != null) hide tags and pre-day toggle
+                const SizedBox.shrink(),
               ],
               // NEW: bottom spacer to avoid overlap with system home bar
               SizedBox(height: MediaQuery.of(context).padding.bottom + 24),
@@ -659,9 +665,25 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
           };
           final uniqueCalendars = byId.values.toList();
 
+          // IMPORTANT: ensure the calendar passed into this editor (widget.calendar)
+          // is present in the selector list. For shared-with-me calendars the global
+          // CalendarBloc list may not include them, which caused selection to fall
+          // back to the user's default calendar. Insert it if missing.
+          final containsCurrent = uniqueCalendars.any(
+            (c) => c.id == widget.calendar.id,
+          );
+          if (!containsCurrent) {
+            // insert at front so it's obvious to the user
+            uniqueCalendars.insert(0, widget.calendar);
+          }
+
           // NEW: đồng bộ lại _selectedCalendar để tham chiếu đúng instance trong danh sách hiện tại
           if (_selectedCalendar == null && uniqueCalendars.isNotEmpty) {
-            _selectedCalendar = uniqueCalendars.first;
+            // prefer the calendar passed into the page when creating a new task
+            _selectedCalendar = uniqueCalendars.firstWhere(
+              (c) => c.id == widget.calendar.id,
+              orElse: () => uniqueCalendars.first,
+            );
           } else if (_selectedCalendar != null) {
             final match = uniqueCalendars
                 .where((c) => c.id == _selectedCalendar!.id)
