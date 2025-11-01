@@ -20,6 +20,8 @@ import 'package:planmate_app/injection.dart';
 import 'package:planmate_app/domain/calendar/usecases/get_users_sharing_calendar.dart';
 import 'package:planmate_app/data/task/datasources/task_remote_data_source.dart';
 import 'package:planmate_app/data/task/datasources/task_local_data_source.dart';
+import '../../auth/bloc/auth_bloc.dart';
+import '../../auth/bloc/auth_state.dart';
 
 class CalendarDetailPage extends StatelessWidget {
   final CalendarEntity calendar;
@@ -495,15 +497,22 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
       appBar: AppBar(
         title: Text(widget.calendar.name),
         actions: [
-          // CHANGED: show Share button only if owned
-          BlocBuilder<CalendarBloc, CalendarState>(
-            builder: (context, state) {
-              final owned = _isOwnedId(widget.calendar.id);
-              if (!owned) return const SizedBox.shrink();
-              return IconButton(
-                icon: const Icon(Icons.share_outlined),
-                onPressed: _showShareDialog,
-                tooltip: 'Chia sẻ lịch',
+          // Hide share button for guest
+          BlocBuilder<AuthBloc, AuthState>(
+            builder: (context, authState) {
+              if (authState is AuthGuestSuccess) {
+                return const SizedBox.shrink();
+              }
+              return BlocBuilder<CalendarBloc, CalendarState>(
+                builder: (context, state) {
+                  final owned = _isOwnedId(widget.calendar.id);
+                  if (!owned) return const SizedBox.shrink();
+                  return IconButton(
+                    icon: const Icon(Icons.share_outlined),
+                    onPressed: _showShareDialog,
+                    tooltip: 'Chia sẻ lịch',
+                  );
+                },
               );
             },
           ),
@@ -590,17 +599,24 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
           },
           child: CustomScrollView(
             slivers: [
-              // Phần 1: Danh sách người được chia sẻ
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Text(
-                    'Được chia sẻ với',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
+              // Phần 1: Danh sách người được chia sẻ (ẩn ở chế độ khách)
+              BlocBuilder<AuthBloc, AuthState>(
+                builder: (context, authState) {
+                  if (authState is AuthGuestSuccess) {
+                    return const SliverToBoxAdapter(child: SizedBox.shrink());
+                  }
+                  return SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Text(
+                        'Được chia sẻ với',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                  );
+                },
               ),
-              // CHANGED: Sharing users list respects ownership
+              // CHANGED: Sharing users list respects ownership & guest
               _buildSharingUsersList(),
 
               // Phần 2: Danh sách công việc
@@ -642,32 +658,40 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
 
   // Widget mới: Hiển thị danh sách người dùng
   Widget _buildSharingUsersList() {
-    return BlocBuilder<CalendarBloc, CalendarState>(
-      builder: (context, state) {
-        final owned = _isOwnedId(widget.calendar.id);
-        if (!owned) {
-          return const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 4),
-              child: Text(
-                'Lịch được chia sẻ với bạn. Chỉ chủ sở hữu mới xem và chỉnh sửa chia sẻ.',
-                style: TextStyle(color: Colors.grey),
-              ),
-            ),
-          );
+    return BlocBuilder<AuthBloc, AuthState>(
+      builder: (context, authState) {
+        if (authState is AuthGuestSuccess) {
+          // Guest mode: hide sharing section entirely
+          return const SliverToBoxAdapter(child: SizedBox.shrink());
         }
+        return BlocBuilder<CalendarBloc, CalendarState>(
+          builder: (context, state) {
+            final owned = _isOwnedId(widget.calendar.id);
+            if (!owned) {
+              return const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 4),
+                  child: Text(
+                    'Lịch được chia sẻ với bạn. Chỉ chủ sở hữu mới xem và chỉnh sửa chia sẻ.',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+              );
+            }
 
-        if (_sharingUsersLocal.isEmpty) {
-          // Empty list (not shared) is also valid UI; show a hint
-          return const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16.0),
-              child: Text('Lịch này chưa được chia sẻ với ai.'),
-            ),
-          );
-        }
+            if (_sharingUsersLocal.isEmpty) {
+              // Empty list (not shared) is also valid UI; show a hint
+              return const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Text('Lịch này chưa được chia sẻ với ai.'),
+                ),
+              );
+            }
 
-        return _buildUsersSliver(_sharingUsersLocal);
+            return _buildUsersSliver(_sharingUsersLocal);
+          },
+        );
       },
     );
   }
