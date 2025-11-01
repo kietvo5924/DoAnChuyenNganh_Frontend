@@ -210,6 +210,7 @@ class TaskRepositoryImpl implements TaskRepository {
           ? DateFormat('yyyy-MM-dd').format(task.repeatEnd!)
           : null,
       'exceptions': task.exceptions,
+      'preDayNotify': task.preDayNotify,
     };
     final taskId = (task.id == 0) ? null : task.id;
 
