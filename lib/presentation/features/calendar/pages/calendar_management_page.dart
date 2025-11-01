@@ -12,6 +12,9 @@ import '../bloc/calendar_state.dart';
 import 'add_calendar_page.dart';
 import 'edit_calendar_page.dart';
 import '../../../../domain/calendar/entities/calendar_entity.dart';
+// NEW: auth state to detect guest mode
+import '../../auth/bloc/auth_bloc.dart';
+import '../../auth/bloc/auth_state.dart';
 
 class CalendarManagementPage extends StatefulWidget {
   const CalendarManagementPage({super.key});
@@ -19,10 +22,7 @@ class CalendarManagementPage extends StatefulWidget {
   State<CalendarManagementPage> createState() => _CalendarManagementPageState();
 }
 
-class _CalendarManagementPageState extends State<CalendarManagementPage>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
+class _CalendarManagementPageState extends State<CalendarManagementPage> {
   // Cache riêng cho 2 danh sách
   List<CalendarEntity> _myCalendars = [];
   List<CalendarEntity> _sharedCalendars = [];
@@ -30,16 +30,13 @@ class _CalendarManagementPageState extends State<CalendarManagementPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    // Fetch cả 2 loại lịch khi vào trang
+    // Fetch lịch khi vào trang
     context.read<CalendarBloc>().add(FetchCalendars());
-    context.read<CalendarBloc>().add(FetchSharedWithMeCalendars());
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+    // Chỉ fetch lịch được chia sẻ nếu KHÔNG ở chế độ khách
+    final isGuest = context.read<AuthBloc>().state is AuthGuestSuccess;
+    if (!isGuest) {
+      context.read<CalendarBloc>().add(FetchSharedWithMeCalendars());
+    }
   }
 
   void _showDeleteConfirmationDialog(BuildContext context, int calendarId) {
@@ -108,96 +105,113 @@ class _CalendarManagementPageState extends State<CalendarManagementPage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Quản lý Lịch'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Lịch của tôi'),
-            Tab(text: 'Được chia sẻ'),
-          ],
-        ),
-      ),
-      body: BlocListener<CalendarBloc, CalendarState>(
-        listener: (context, state) {
-          if (state is CalendarOperationSuccess) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(state.message),
-                backgroundColor: Colors.green,
-              ),
-            );
-            // Fetch lại cả 2 danh sách khi có thao tác thành công
-            context.read<CalendarBloc>().add(FetchCalendars());
-            context.read<CalendarBloc>().add(FetchSharedWithMeCalendars());
-            // Cập nhật home và tasks
-            context.read<HomeBloc>().add(FetchHomeData());
-            context.read<AllTasksBloc>().add(FetchAllTasks());
-          } else if (state is CalendarError) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(state.message),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-        },
-        child: BlocBuilder<CalendarBloc, CalendarState>(
-          builder: (context, state) {
-            // Cập nhật cache khi state thay đổi
-            // SỬA ĐỔI QUAN TRỌNG:
-            if (state is CalendarLoaded) {
-              _myCalendars = state.calendars; // Đọc từ state.calendars
-            } else if (state is CalendarSharedWithMeLoaded) {
-              _sharedCalendars = state.calendars; // Đọc từ state.calendars
-            }
+    return BlocBuilder<AuthBloc, AuthState>(
+      builder: (context, authState) {
+        final isGuest = authState is AuthGuestSuccess;
+        final tabLength = isGuest ? 1 : 2;
 
-            final isBusy =
-                state is CalendarLoading ||
-                state is CalendarOperationInProgress;
-
-            return Stack(
-              children: [
-                TabBarView(
-                  controller: _tabController,
-                  children: [
-                    // Tab 1: Lịch của tôi (dùng cache _myCalendars)
-                    _buildMyCalendarsList(context, _myCalendars, isBusy, state),
-                    // Tab 2: Lịch được chia sẻ (dùng cache _sharedCalendars)
-                    _buildSharedCalendarsList(
-                      context,
-                      _sharedCalendars,
-                      isBusy,
-                      state,
+        return DefaultTabController(
+          length: tabLength,
+          child: Scaffold(
+            appBar: AppBar(
+              title: const Text('Quản lý Lịch'),
+              bottom: TabBar(
+                tabs: [
+                  const Tab(text: 'Lịch của tôi'),
+                  if (!isGuest) const Tab(text: 'Được chia sẻ'),
+                ],
+              ),
+            ),
+            body: BlocListener<CalendarBloc, CalendarState>(
+              listener: (context, state) {
+                if (state is CalendarOperationSuccess) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(state.message),
+                      backgroundColor: Colors.green,
                     ),
-                  ],
-                ),
-                if (isBusy)
-                  Positioned.fill(
-                    child: Container(
-                      color: Colors.black.withOpacity(0.05),
-                      child: const Center(
-                        child: SizedBox(
-                          width: 40,
-                          height: 40,
-                          child: CircularProgressIndicator(),
-                        ),
+                  );
+                  // Fetch lại cả 2 danh sách khi có thao tác thành công
+                  context.read<CalendarBloc>().add(FetchCalendars());
+                  context.read<CalendarBloc>().add(
+                    FetchSharedWithMeCalendars(),
+                  );
+                  // Cập nhật home và tasks
+                  context.read<HomeBloc>().add(FetchHomeData());
+                  context.read<AllTasksBloc>().add(FetchAllTasks());
+                } else if (state is CalendarError) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(state.message),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              child: BlocBuilder<CalendarBloc, CalendarState>(
+                builder: (context, state) {
+                  // Cập nhật cache khi state thay đổi
+                  // SỬA ĐỔI QUAN TRỌNG:
+                  if (state is CalendarLoaded) {
+                    _myCalendars = state.calendars; // Đọc từ state.calendars
+                  } else if (state is CalendarSharedWithMeLoaded) {
+                    _sharedCalendars =
+                        state.calendars; // Đọc từ state.calendars
+                  }
+
+                  final isBusy =
+                      state is CalendarLoading ||
+                      state is CalendarOperationInProgress;
+
+                  return Stack(
+                    children: [
+                      TabBarView(
+                        children: [
+                          // Tab 1: Lịch của tôi (dùng cache _myCalendars)
+                          _buildMyCalendarsList(
+                            context,
+                            _myCalendars,
+                            isBusy,
+                            state,
+                          ),
+                          if (!isGuest)
+                            // Tab 2: Lịch được chia sẻ (dùng cache _sharedCalendars)
+                            _buildSharedCalendarsList(
+                              context,
+                              _sharedCalendars,
+                              isBusy,
+                              state,
+                            ),
+                        ],
                       ),
-                    ),
-                  ),
-              ],
-            );
-          },
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const AddCalendarPage()),
-        ),
-        child: const Icon(Icons.add),
-      ),
+                      if (isBusy)
+                        Positioned.fill(
+                          child: Container(
+                            color: Colors.black.withOpacity(0.05),
+                            child: const Center(
+                              child: SizedBox(
+                                width: 40,
+                                height: 40,
+                                child: CircularProgressIndicator(),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            floatingActionButton: FloatingActionButton(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AddCalendarPage()),
+              ),
+              child: const Icon(Icons.add),
+            ),
+          ),
+        );
+      },
     );
   }
 

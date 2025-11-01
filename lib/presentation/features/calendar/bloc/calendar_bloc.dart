@@ -13,7 +13,6 @@ import '../../../../domain/calendar/usecases/unshare_calendar.dart';
 import '../../../../domain/calendar/usecases/get_users_sharing_calendar.dart';
 import '../../../../domain/calendar/usecases/get_calendars_shared_with_me.dart';
 // THÊM ENTITY
-import '../../../../domain/user/entities/user_entity.dart';
 import 'calendar_event.dart';
 import 'calendar_state.dart';
 

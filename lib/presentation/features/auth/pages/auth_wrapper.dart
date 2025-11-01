@@ -33,10 +33,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
         if (state is AuthAlreadyLoggedIn || state is AuthGuestSuccess) {
           return const HomePage();
         }
-        // Chưa đăng nhập, đã đăng xuất, hoặc có lỗi -> Về trang đăng nhập
+        // Chưa đăng nhập, đã đăng xuất, đăng ký thành công (về trang đăng nhập), hoặc có lỗi -> Về trang đăng nhập
         if (state is AuthSignedOut ||
             state is AuthFailure ||
-            state is AuthInitial) {
+            state is AuthInitial ||
+            state is AuthSignUpSuccess) {
           return const SignInPage();
         }
         // Các trạng thái khác (ví dụ: AuthLoading) -> Hiển thị màn hình chờ
