@@ -17,6 +17,8 @@ import '../../tag/bloc/tag_state.dart';
 import '../../tag/bloc/tag_event.dart';
 import '../../../../domain/tag/entities/tag_entity.dart';
 import 'dart:convert';
+import '../../home/bloc/home_bloc.dart';
+import '../../home/bloc/home_event.dart';
 
 class AllTasksPage extends StatefulWidget {
   const AllTasksPage({super.key});
@@ -89,7 +91,12 @@ class _AllTasksPageState extends State<AllTasksPage> {
                             builder: (_) => TaskEditorPage(calendar: calendar),
                           ),
                         ).then((created) {
-                          if (created == true) _fetchAllTasks();
+                          if (created == true) {
+                            _fetchAllTasks();
+                            if (mounted) {
+                              pageContext.read<HomeBloc>().add(FetchHomeData());
+                            }
+                          }
                         });
                       },
                       child: Text(calendar.name),
@@ -361,7 +368,12 @@ class _AllTasksPageState extends State<AllTasksPage> {
                                 ),
                               ),
                             ).then((updated) {
-                              if (updated == true) _fetchAllTasks();
+                              if (updated == true) {
+                                _fetchAllTasks();
+                                if (mounted) {
+                                  context.read<HomeBloc>().add(FetchHomeData());
+                                }
+                              }
                             });
                           },
                         );

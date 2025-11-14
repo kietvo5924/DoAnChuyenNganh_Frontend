@@ -142,12 +142,21 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
                   context.read<HomeBloc>().add(FetchHomeData());
                   context.read<AllTasksBloc>().add(FetchAllTasks());
                 } else if (state is CalendarError) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(state.message),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
+                  final msg = state.message.toLowerCase();
+                  final isSharedLoadError =
+                      (msg.contains('lỗi tải') &&
+                      (msg.contains('được chia sẻ') ||
+                          msg.contains('danh sách chia sẻ')));
+
+                  // Ẩn thông báo lỗi khi chỉ là lỗi tải danh sách lịch được chia sẻ
+                  if (!isSharedLoadError) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(state.message),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
                 }
               },
               child: BlocBuilder<CalendarBloc, CalendarState>(
@@ -155,10 +164,28 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
                   // Cập nhật cache khi state thay đổi
                   // SỬA ĐỔI QUAN TRỌNG:
                   if (state is CalendarLoaded) {
-                    _myCalendars = state.calendars; // Đọc từ state.calendars
+                    // Lọc chỉ lịch sở hữu (permissionLevel null/empty)
+                    _myCalendars = state.calendars
+                        .where(
+                          (c) =>
+                              c.permissionLevel == null ||
+                              c.permissionLevel!.isEmpty,
+                        )
+                        .toList();
+                    // Nếu CalendarLoaded chứa cả lịch chia sẻ, trích riêng ra để tránh mất khi chưa có Shared state
+                    final sharedExtract = state.calendars
+                        .where(
+                          (c) =>
+                              c.permissionLevel != null &&
+                              c.permissionLevel!.isNotEmpty,
+                        )
+                        .toList();
+                    if (sharedExtract.isNotEmpty && _sharedCalendars.isEmpty) {
+                      _sharedCalendars = sharedExtract;
+                    }
                   } else if (state is CalendarSharedWithMeLoaded) {
                     _sharedCalendars =
-                        state.calendars; // Đọc từ state.calendars
+                        state.calendars; // cập nhật danh sách chia sẻ
                   }
 
                   final isBusy =

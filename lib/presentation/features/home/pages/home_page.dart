@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
+import 'dart:async'; // keep: needed for timeout on stream await
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
@@ -11,6 +12,18 @@ import '../../../../domain/task/entities/task_entity.dart';
 import '../../../widgets/loading_indicator.dart';
 import '../../../widgets/empty_state.dart';
 import '../../../widgets/section_header.dart';
+// NEW: tag bloc for filtering
+import '../../tag/bloc/tag_bloc.dart';
+import '../../tag/bloc/tag_state.dart';
+import '../../tag/bloc/tag_event.dart';
+// NEW: calendar bloc to include shared calendars in filter
+import '../../calendar/bloc/calendar_bloc.dart';
+import '../../calendar/bloc/calendar_event.dart';
+import '../../calendar/bloc/calendar_state.dart';
+// Auth bloc to trigger reload after login
+import '../../auth/bloc/auth_bloc.dart';
+import '../../auth/bloc/auth_state.dart';
+import '../../../../domain/calendar/entities/calendar_entity.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -22,6 +35,11 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late DateTime _focusedDay;
   DateTime? _selectedDay;
+
+  // NEW: filter selections
+  int? _selectedCalendarId;
+  int? _selectedTagId;
+  bool _calendarCollapsed = false; // Collapse the calendar grid, not filters
 
   // Check if a task occurs on a specific calendar day.
   bool _occursOn(TaskEntity t, DateTime day) {
@@ -83,8 +101,152 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _focusedDay = DateTime.now();
     _selectedDay = _focusedDay;
-    // Sẽ fallback sang toàn bộ tasks nếu mất calendar default
-    context.read<HomeBloc>().add(FetchHomeData());
+    // Thực hiện tuần tự: tải lịch chia sẻ (kèm task) rồi mới fetch HomeData
+    // tránh tình trạng phải ấn lại trang chủ mới thấy task lịch chia sẻ.
+    _initializeData();
+  }
+
+  Future<void> _initializeData() async {
+    // 1. Trigger fetch lịch chia sẻ (không chờ) để tăng tốc hiển thị ban đầu
+    final calBloc = context.read<CalendarBloc>();
+    calBloc.add(FetchSharedWithMeCalendars());
+    // 2. Fetch HomeData ngay lập tức với dữ liệu hiện có (sẽ refetch lại khi shared load listener kích hoạt)
+    if (mounted) {
+      context.read<HomeBloc>().add(FetchHomeData());
+    }
+    // 3. Fetch tags nếu cần (song song không cần chờ)
+    final tagBloc = context.read<TagBloc>();
+    if (tagBloc.state is TagInitial) {
+      tagBloc.add(const FetchTags());
+    }
+    // 4. Khi lịch chia sẻ load xong listener bên dưới sẽ refetch nên không chờ ở đây.
+  }
+
+  // NEW: filter bar widget (instance method so we can use setState)
+  Widget _buildFilterBar(HomeLoaded state) {
+    // Merge & deduplicate calendars (allow duplicates silently, we only show unique items)
+    final List<CalendarEntity> merged = [
+      ...state.calendars,
+      if (context.watch<CalendarBloc>().state is CalendarSharedWithMeLoaded)
+        ...((context.watch<CalendarBloc>().state as CalendarSharedWithMeLoaded)
+            .calendars),
+    ];
+    final Map<int, CalendarEntity> byId = {for (final c in merged) c.id: c};
+    final List<CalendarEntity> allCalendars = byId.values.toList();
+
+    // Ensure selected id exists after dedup; do NOT reset on duplicates anymore
+    int? effectiveSelected = _selectedCalendarId;
+    if (effectiveSelected != null) {
+      final exists = byId.containsKey(effectiveSelected);
+      if (!exists) {
+        effectiveSelected = null;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _selectedCalendarId != null) {
+            setState(() => _selectedCalendarId = null);
+          }
+        });
+      }
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: DropdownButtonFormField<int?>(
+              value: effectiveSelected,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Lịch',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: [
+                const DropdownMenuItem<int?>(
+                  value: null,
+                  child: Text('Tất cả lịch'),
+                ),
+                ...allCalendars.map(
+                  (c) => DropdownMenuItem<int?>(
+                    value: c.id,
+                    child: Row(
+                      children: [
+                        if (c.permissionLevel != null)
+                          const Icon(Icons.folder_shared_outlined, size: 16),
+                        if (c.permissionLevel != null) const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            c.name, // removed '(chia sẻ)' suffix per request
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              onChanged: (val) => setState(() => _selectedCalendarId = val),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: BlocBuilder<TagBloc, TagState>(
+              builder: (context, tagState) {
+                if (tagState is TagLoaded) {
+                  return DropdownButtonFormField<int?>(
+                    value: _selectedTagId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Nhãn',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('Tất cả nhãn'),
+                      ),
+                      ...tagState.tags.map(
+                        (tg) => DropdownMenuItem<int?>(
+                          value: tg.id,
+                          child: Text(
+                            tg.name.isEmpty ? 'Nhãn #${tg.id}' : tg.name,
+                          ),
+                        ),
+                      ),
+                    ],
+                    onChanged: (val) => setState(() => _selectedTagId = val),
+                  );
+                }
+                if (tagState is TagError) return const SizedBox();
+                return const SizedBox(
+                  height: 48,
+                  child: Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          IconButton(
+            tooltip: 'Xóa bộ lọc',
+            icon: const Icon(Icons.filter_alt_off),
+            onPressed: () {
+              if (_selectedCalendarId != null || _selectedTagId != null) {
+                setState(() {
+                  _selectedCalendarId = null;
+                  _selectedTagId = null;
+                });
+              }
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -96,163 +258,266 @@ class _HomePageState extends State<HomePage> {
         foregroundColor: Colors.white,
       ),
       drawer: const AppDrawer(),
-      body: BlocBuilder<HomeBloc, HomeState>(
-        builder: (context, state) {
-          if (state is HomeLoading) {
-            return const Center(child: LoadingIndicator());
-          }
-          if (state is HomeLoaded) {
-            List<TaskEntity> getEventsForDay(DateTime day) {
-              return state.tasks.where((t) => _occursOn(t, day)).toList();
+      body: MultiBlocListener(
+        listeners: [
+          // Sau khi login: chỉ fetch calendars chia sẻ trước, rồi Home sẽ refetch khi shared load xong
+          BlocListener<AuthBloc, AuthState>(
+            listenWhen: (prev, curr) =>
+                curr is AuthJustLoggedIn || curr is AuthAlreadyLoggedIn,
+            listener: (context, authState) async {
+              final calBloc = context.read<CalendarBloc>();
+              calBloc.add(FetchSharedWithMeCalendars());
+              // Chờ shared calendars hoặc timeout 2s
+              try {
+                await calBloc.stream
+                    .firstWhere((s) => s is CalendarSharedWithMeLoaded)
+                    .timeout(const Duration(seconds: 2));
+              } catch (_) {
+                // timeout hoặc lỗi: vẫn tiếp tục
+              }
+              if (!mounted) return;
+              context.read<HomeBloc>().add(FetchHomeData());
+              // Nếu đang chọn một calendar đã biến mất sau login thì reset
+              if (_selectedCalendarId != null) {
+                final homeState = context.read<HomeBloc>().state;
+                if (homeState is HomeLoaded) {
+                  final hasId = homeState.calendars.any(
+                    (c) => c.id == _selectedCalendarId,
+                  );
+                  if (!hasId) setState(() => _selectedCalendarId = null);
+                }
+              }
+            },
+          ),
+          // Khi lịch chia sẻ (và tasks của chúng) đã được cache: refetch HomeData để hiển thị ngay
+          BlocListener<CalendarBloc, CalendarState>(
+            listenWhen: (prev, curr) => curr is CalendarSharedWithMeLoaded,
+            listener: (context, calState) {
+              // Tránh refetch thừa nếu Home đang loading
+              final homeBloc = context.read<HomeBloc>();
+              if (homeBloc.state is! HomeLoading) {
+                homeBloc.add(FetchHomeData());
+              }
+            },
+          ),
+        ],
+        child: BlocBuilder<HomeBloc, HomeState>(
+          builder: (context, state) {
+            if (state is HomeLoading) {
+              return const Center(child: LoadingIndicator());
             }
+            if (state is HomeLoaded) {
+              // Merge calendar names (my + shared) for lookup
+              final List<CalendarEntity> merged = List.from(state.calendars);
+              final calState = context.watch<CalendarBloc>().state;
+              if (calState is CalendarSharedWithMeLoaded) {
+                for (final sc in calState.calendars) {
+                  if (!merged.any((c) => c.id == sc.id)) merged.add(sc);
+                }
+              }
+              final nameMap = {for (final c in merged) c.id: c.name};
 
-            final selectedTasks = _selectedDay != null
-                ? getEventsForDay(_selectedDay!)
-                : const <TaskEntity>[];
-            final displayTasks =
-                selectedTasks; // chỉ hiển thị trong ngày đã chọn
+              // Apply filters
+              List<TaskEntity> filtered = state.tasks;
+              if (_selectedCalendarId != null) {
+                filtered = filtered
+                    .where((t) => t.calendarId == _selectedCalendarId!)
+                    .toList();
+              }
+              if (_selectedTagId != null) {
+                filtered = filtered
+                    .where((t) => t.tags.any((tg) => tg.id == _selectedTagId!))
+                    .toList();
+              }
 
-            return Column(
-              children: [
-                TableCalendar<TaskEntity>(
-                  locale: 'vi_VN',
-                  focusedDay: _focusedDay,
-                  firstDay: DateTime.utc(2000, 1, 1),
-                  lastDay: DateTime.utc(2100, 12, 31),
-                  startingDayOfWeek: StartingDayOfWeek.monday,
-                  selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-                  onDaySelected: (selectedDay, focusedDay) {
-                    setState(() {
-                      _selectedDay = selectedDay;
-                      _focusedDay = focusedDay;
-                    });
-                  },
-                  eventLoader: getEventsForDay,
-                  calendarBuilders: CalendarBuilders(
-                    markerBuilder: (context, day, events) {
-                      if (events.isEmpty) return const SizedBox.shrink();
+              List<TaskEntity> getEventsForDay(DateTime day) =>
+                  filtered.where((t) => _occursOn(t, day)).toList();
 
-                      // Build up to maxDots colored dots, one per task
-                      const int maxDots = 6;
-                      final int total = events.length;
-                      final int shown = total > maxDots ? maxDots : total;
+              final selectedTasks = _selectedDay != null
+                  ? getEventsForDay(_selectedDay!)
+                  : const <TaskEntity>[];
+              final displayTasks = selectedTasks;
 
-                      List<Widget> dots = [];
-                      for (int i = 0; i < shown; i++) {
-                        final t = events[i];
-                        Color color;
-                        if (t.tags.isNotEmpty) {
-                          final firstTag = t.tags.first;
-                          color = _hexToColor(
-                            firstTag.color,
-                          ).withValues(alpha: 0.95);
-                        } else {
-                          color = Theme.of(context).colorScheme.primary;
-                        }
-                        dots.add(
-                          Container(
-                            width: 6,
-                            height: 6,
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 1,
-                              vertical: 1,
-                            ),
-                            decoration: BoxDecoration(
-                              color: color,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        );
-                      }
-
-                      return Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 2.0),
-                          child: Wrap(
-                            alignment: WrapAlignment.center,
-                            spacing: 2,
-                            runSpacing: 2,
-                            children: dots,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  calendarStyle: const CalendarStyle(markersMaxCount: 6),
-                  headerStyle: const HeaderStyle(
-                    formatButtonVisible: false,
-                    titleCentered: true,
-                  ),
-                ),
-                const Divider(height: 1),
-                SectionHeader(
-                  title: _selectedDay != null
-                      ? 'Công việc ngày ${_selectedDay!.day}/${_selectedDay!.month}/${_selectedDay!.year}'
-                      : 'Công việc trong ngày',
-                  trailing: Text(
-                    '(${displayTasks.length})',
-                    style: const TextStyle(color: Colors.grey),
-                  ),
-                ),
-                Expanded(
-                  child: displayTasks.isEmpty
-                      ? const Center(
-                          child: EmptyState(
-                            icon: Icons.inbox_outlined,
-                            title: 'Không có công việc',
-                            message:
-                                'Hãy thêm công việc mới hoặc chọn ngày khác.',
-                          ),
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          itemCount: displayTasks.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 8),
-                          itemBuilder: (_, i) {
-                            final t = displayTasks[i];
-                            final idx = state.calendars.indexWhere(
-                              (c) => c.id == t.calendarId,
-                            );
-                            final safeCalName = idx >= 0
-                                ? state.calendars[idx].name
-                                : '(Lịch #${t.calendarId})';
-                            return Card(
-                              child: ListTile(
-                                key: ValueKey(t.id),
-                                leading: Icon(
-                                  t.repeatType == RepeatType.NONE
-                                      ? Icons.event
-                                      : Icons.repeat,
-                                  color: Colors.blue,
-                                ),
-                                title: Text(t.title),
-                                subtitle: Text('Lịch: $safeCalName'),
-                                onTap: () =>
-                                    _showTaskDetailDialog(t, safeCalName),
+              return Column(
+                children: [
+                  _buildFilterBar(state),
+                  if (_calendarCollapsed)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Ngày: ${DateFormat('dd/MM/yyyy').format(_selectedDay ?? _focusedDay)}',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
                               ),
-                            );
-                          },
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Mở lịch',
+                            icon: const Icon(Icons.unfold_more),
+                            onPressed: () =>
+                                setState(() => _calendarCollapsed = false),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4, top: 2),
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: IconButton(
+                              tooltip: 'Thu gọn lịch',
+                              icon: const Icon(Icons.unfold_less),
+                              onPressed: () =>
+                                  setState(() => _calendarCollapsed = true),
+                            ),
+                          ),
                         ),
-                ),
-              ],
+                        TableCalendar<TaskEntity>(
+                          locale: 'vi_VN',
+                          focusedDay: _focusedDay,
+                          firstDay: DateTime.utc(2000, 1, 1),
+                          lastDay: DateTime.utc(2100, 12, 31),
+                          startingDayOfWeek: StartingDayOfWeek.monday,
+                          selectedDayPredicate: (day) =>
+                              isSameDay(_selectedDay, day),
+                          onDaySelected: (selectedDay, focusedDay) {
+                            setState(() {
+                              _selectedDay = selectedDay;
+                              _focusedDay = focusedDay;
+                            });
+                          },
+                          eventLoader: getEventsForDay,
+                          calendarBuilders: CalendarBuilders(
+                            markerBuilder: (context, day, events) {
+                              if (events.isEmpty)
+                                return const SizedBox.shrink();
+                              const int maxDots = 6;
+                              final int shown = events.length > maxDots
+                                  ? maxDots
+                                  : events.length;
+                              final dots = List.generate(shown, (i) {
+                                final t = events[i];
+                                Color color;
+                                if (t.tags.isNotEmpty) {
+                                  color = _hexToColor(
+                                    t.tags.first.color,
+                                  ).withValues(alpha: 0.95);
+                                } else {
+                                  color = Theme.of(context).colorScheme.primary;
+                                }
+                                return Container(
+                                  width: 6,
+                                  height: 6,
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 1,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: color,
+                                    shape: BoxShape.circle,
+                                  ),
+                                );
+                              });
+                              return Align(
+                                alignment: Alignment.bottomCenter,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(bottom: 2.0),
+                                  child: Wrap(
+                                    alignment: WrapAlignment.center,
+                                    spacing: 2,
+                                    runSpacing: 2,
+                                    children: dots,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          calendarStyle: const CalendarStyle(
+                            markersMaxCount: 6,
+                          ),
+                          headerStyle: const HeaderStyle(
+                            formatButtonVisible: false,
+                            titleCentered: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                  const Divider(height: 1),
+                  SectionHeader(
+                    title: _selectedDay != null
+                        ? 'Công việc ngày ${_selectedDay!.day}/${_selectedDay!.month}/${_selectedDay!.year}'
+                        : 'Công việc trong ngày',
+                    trailing: Text(
+                      '(${displayTasks.length})',
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  ),
+                  Expanded(
+                    child: displayTasks.isEmpty
+                        ? const Center(
+                            child: EmptyState(
+                              icon: Icons.inbox_outlined,
+                              title: 'Không có công việc',
+                              message:
+                                  'Hãy thêm công việc mới hoặc chọn ngày khác.',
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            itemCount: displayTasks.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (_, i) {
+                              final t = displayTasks[i];
+                              final safeCalName =
+                                  nameMap[t.calendarId] ??
+                                  '(Lịch #${t.calendarId})';
+                              return Card(
+                                child: ListTile(
+                                  key: ValueKey(t.id),
+                                  leading: Icon(
+                                    t.repeatType == RepeatType.NONE
+                                        ? Icons.event
+                                        : Icons.repeat,
+                                    color: Colors.blue,
+                                  ),
+                                  title: Text(t.title),
+                                  subtitle: Text('Lịch: $safeCalName'),
+                                  onTap: () =>
+                                      _showTaskDetailDialog(t, safeCalName),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              );
+            }
+            if (state is HomeError) {
+              return Center(child: Text(state.message));
+            }
+            return const Center(
+              child: Text(
+                'Nội dung trang chủ (Lịch chính và các công việc) sẽ được hiển thị ở đây.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Colors.grey),
+              ),
             );
-          }
-          if (state is HomeError) {
-            return Center(child: Text(state.message));
-          }
-          return const Center(
-            child: Text(
-              'Nội dung trang chủ (Lịch chính và các công việc) sẽ được hiển thị ở đây.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16, color: Colors.grey),
-            ),
-          );
-        },
+          },
+        ),
       ),
     );
   }

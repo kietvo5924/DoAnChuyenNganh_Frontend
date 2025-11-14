@@ -2,9 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
-import 'package:planmate_app/injection.dart';
 import 'package:planmate_app/presentation/features/tag/bloc/tag_state.dart';
-import '../../../../core/services/database_service.dart';
 import '../../../../domain/calendar/entities/calendar_entity.dart';
 import '../../../../domain/tag/entities/tag_entity.dart';
 import '../../../../domain/task/entities/task_entity.dart';
@@ -18,7 +16,6 @@ import '../bloc/task_editor_event.dart';
 import '../bloc/task_editor_state.dart';
 import '../../../widgets/app_text_field.dart';
 import '../../../widgets/loading_indicator.dart';
-import '../../../../core/services/logger.dart';
 
 enum RepeatOption { none, daily, weekly, monthly, yearly }
 
@@ -71,8 +68,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
 
   bool _calendarFetchRequested = false;
   bool _submitting = false; // NEW
-  bool _tagResolving = false; // NEW
-  bool _tagResolvedOnce = false; // NEW
+  // Removed tag auto-resolve flags
   bool _preDayNotify = false; // NEW: per-task toggle
 
   // NEW: Global notification preferences (applies to all tasks)
@@ -102,7 +98,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
       _titleController.text = task.title;
       _descriptionController.text = task.description ?? '';
       _selectedTags.addAll(task.tags);
-      _scheduleResolveTags(task.id); // NEW (thay vì chỉ _resolveTagsLocally)
+      // REMOVE: không tự động tải lại nhãn khi mở sửa
 
       _selectedRepeatOption = RepeatOption.values.firstWhere(
         (e) => e.name == task.repeatType.name.toLowerCase(),
@@ -153,94 +149,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
     // REMOVE: _loadNotifyPrefs();
   }
 
-  void _scheduleResolveTags(int taskId) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadTagsFromMapping(taskId);
-    });
-  }
-
-  Future<void> _loadTagsFromMapping(int taskId) async {
-    if (_tagResolving || !_isEditing) return;
-    _tagResolving = true;
-    try {
-      final db = await getIt<DatabaseService>().database;
-      final rows = await db.rawQuery(
-        '''
-        SELECT T.id, T.name, T.color
-        FROM task_tags_local TT
-        INNER JOIN tags T ON T.id = TT.tag_id
-        WHERE TT.task_id = ?
-        ORDER BY T.id ASC
-        ''',
-        [taskId],
-      );
-      if (mounted) {
-        if (rows.isNotEmpty) {
-          final updated = rows
-              .map(
-                (r) => TagEntity(
-                  id: r['id'] as int,
-                  name: (r['name'] as String?) ?? '',
-                  color: r['color'] as String?,
-                ),
-              )
-              .toSet();
-          setState(() {
-            _selectedTags
-              ..clear()
-              ..addAll(updated);
-          });
-        } else {
-          // NEW: không còn mapping -> xóa nhãn đã chọn (tránh hiển thị nhãn đã xóa)
-          setState(() {
-            _selectedTags.clear();
-          });
-        }
-      }
-    } catch (e) {
-      Logger.w('[TaskEditor] Error load tag mapping: $e');
-    } finally {
-      _tagResolving = false;
-      _tagResolvedOnce = true;
-    }
-  }
-
-  // NEW: chỉ cố gắng lấy metadata tag từ local nếu tên trống (không gọi remote)
-  // ignore: unused_element
-  Future<void> _resolveTagsLocally() async {
-    if (_selectedTags.isEmpty) return;
-    final need = _selectedTags.any((t) => t.name.isEmpty);
-    if (!need) return;
-    try {
-      final db = await getIt<DatabaseService>().database;
-      final ids = _selectedTags.map((t) => t.id).toList();
-      final rows = await db.query(
-        'tags',
-        where: 'id IN (${List.filled(ids.length, '?').join(',')})',
-        whereArgs: ids,
-      );
-      if (rows.isEmpty) return;
-      final map = {
-        for (final r in rows)
-          r['id'] as int: TagEntity(
-            id: r['id'] as int,
-            name: (r['name'] as String?) ?? '',
-            color: r['color'] as String?,
-          ),
-      };
-      setState(() {
-        final updated = <TagEntity>{};
-        for (final t in _selectedTags) {
-          updated.add(map[t.id] ?? t);
-        }
-        _selectedTags
-          ..clear()
-          ..addAll(updated);
-      });
-    } catch (_) {
-      // silent
-    }
-  }
+  // Removed: tag mapping and local resolve helpers
 
   void _ensureCalendarsLoaded() {
     if (_calendarFetchRequested) return;
@@ -377,6 +286,36 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
           _endTime.minute,
         );
       }
+    });
+  }
+
+  // Chọn ngày/tháng cho lặp hằng năm (bỏ qua năm)
+  Future<void> _selectAnnualDate(BuildContext context) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _startDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null) return;
+    if (!mounted) return;
+    setState(() {
+      // Giữ nguyên giờ bắt đầu hiện tại; thay đổi ngày/tháng
+      _startDate = DateTime(
+        _startDate.year,
+        picked.month,
+        picked.day,
+        _startTime.hour,
+        _startTime.minute,
+      );
+      // Cập nhật endDate để đồng bộ (giờ kết thúc đã có trong _endTime)
+      _endDate = DateTime(
+        _startDate.year,
+        _startDate.month,
+        _startDate.day,
+        _endTime.hour,
+        _endTime.minute,
+      );
     });
   }
 
@@ -604,21 +543,31 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
                         value == null ? 'Vui lòng chọn ngày' : null,
                   ),
                 ),
-              if (_selectedRepeatOption == RepeatOption.yearly)
-                Padding(
-                  padding: const EdgeInsets.only(top: 16.0),
-                  child: ListTile(
-                    leading: Icon(Icons.info_outline, color: Colors.blue),
-                    title: Text(
-                      'Sẽ lặp lại vào ngày ${DateFormat('d MMMM', 'vi_VN').format(_startDate)} mỗi năm.',
-                    ),
-                    tileColor: Colors.blue.withValues(alpha: 0.05),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      side: BorderSide(color: Colors.blue.shade100),
-                    ),
+              if (_selectedRepeatOption == RepeatOption.yearly) ...[
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(Icons.event_repeat),
+                  title: const Text('Ngày lặp theo năm'),
+                  subtitle: Text(
+                    DateFormat('dd/MM', 'vi_VN').format(_startDate),
+                  ),
+                  trailing: const Icon(Icons.edit_calendar_outlined),
+                  onTap: () => _selectAnnualDate(context),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: BorderSide(color: Colors.blueGrey.shade100),
                   ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6.0),
+                  child: Text(
+                    'Chọn ngày và tháng lặp lại hằng năm (năm sẽ được bỏ qua).',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: Colors.grey),
+                  ),
+                ),
+              ],
               // Show pre-day notify toggle and tag selector only for personal/owned calendars
               if ((_selectedCalendar?.permissionLevel ?? '').isEmpty) ...[
                 // Per-task pre-day toggle (always visible for personal calendars)
@@ -787,18 +736,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
         ),
         const SizedBox(height: 8),
-        if (_isEditing && !_tagResolvedOnce && _selectedTags.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 6),
-            child: Text(
-              'Đang tải nhãn từ dữ liệu cục bộ...',
-              style: TextStyle(
-                fontSize: 12,
-                fontStyle: FontStyle.italic,
-                color: Colors.grey,
-              ),
-            ),
-          ),
+        // Removed transient local tag loading message
         Wrap(
           spacing: 8,
           runSpacing: 4,
@@ -817,15 +755,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
           label: const Text('Thêm nhãn'),
           onPressed: _showTagSelectionDialog,
         ),
-        if (_isEditing)
-          TextButton(
-            onPressed: () {
-              if (widget.taskToEdit != null) {
-                _loadTagsFromMapping(widget.taskToEdit!.id);
-              }
-            },
-            child: const Text('Tải lại nhãn (debug)'),
-          ),
+        // Removed debug reload tags button
       ],
     );
   }

@@ -24,6 +24,8 @@ import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_state.dart';
 import '../../../widgets/loading_indicator.dart';
 import '../../../widgets/empty_state.dart';
+import '../../home/bloc/home_bloc.dart';
+import '../../home/bloc/home_event.dart';
 
 class CalendarDetailPage extends StatelessWidget {
   final CalendarEntity calendar;
@@ -476,7 +478,14 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
                                   ),
                                 ),
                               ).then((result) {
-                                if (result == true) _fetchTasks();
+                                if (result == true) {
+                                  _fetchTasks();
+                                  if (mounted) {
+                                    context.read<HomeBloc>().add(
+                                      FetchHomeData(),
+                                    );
+                                  }
+                                }
                               });
                             },
                             icon: const Icon(Icons.edit_outlined),
@@ -504,6 +513,11 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
           BlocBuilder<AuthBloc, AuthState>(
             builder: (context, authState) {
               if (authState is AuthGuestSuccess) {
+                return const SizedBox.shrink();
+              }
+              // Ẩn nút share nếu lịch là lịch được chia sẻ với tôi (permissionLevel != null)
+              if (widget.calendar.permissionLevel != null &&
+                  widget.calendar.permissionLevel!.isNotEmpty) {
                 return const SizedBox.shrink();
               }
               return BlocBuilder<CalendarBloc, CalendarState>(
@@ -558,12 +572,20 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
                 _fetchSharingUsersDirect(); // NEW: force immediate UI update
                 _ensureRemoteTasksForSharedCalendar();
               } else if (state is CalendarError) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(state.message),
-                    backgroundColor: Colors.red,
-                  ),
-                );
+                final msg = state.message.toLowerCase();
+                final isSharedLoadError =
+                    (msg.contains('lỗi tải') &&
+                    (msg.contains('được chia sẻ') ||
+                        msg.contains('danh sách chia sẻ')));
+                // Ẩn lỗi tải danh sách lịch được chia sẻ tại trang chi tiết
+                if (!isSharedLoadError) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(state.message),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
               }
 
               // Update owned IDs cache when calendars load, then fetch users/tasks
@@ -606,6 +628,11 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
               BlocBuilder<AuthBloc, AuthState>(
                 builder: (context, authState) {
                   if (authState is AuthGuestSuccess) {
+                    return const SliverToBoxAdapter(child: SizedBox.shrink());
+                  }
+                  // Ẩn hoàn toàn phần "Được chia sẻ với" nếu đây là lịch được chia sẻ với tôi
+                  if (widget.calendar.permissionLevel != null &&
+                      widget.calendar.permissionLevel!.isNotEmpty) {
                     return const SliverToBoxAdapter(child: SizedBox.shrink());
                   }
                   return SliverToBoxAdapter(
@@ -651,7 +678,12 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
                     builder: (_) => TaskEditorPage(calendar: widget.calendar),
                   ),
                 ).then((result) {
-                  if (result == true) _fetchTasks();
+                  if (result == true) {
+                    _fetchTasks();
+                    if (mounted) {
+                      context.read<HomeBloc>().add(FetchHomeData());
+                    }
+                  }
                 });
               },
               child: const Icon(Icons.add_task),
@@ -668,19 +700,17 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
           // Guest mode: hide sharing section entirely
           return const SliverToBoxAdapter(child: SizedBox.shrink());
         }
+        // Nếu là lịch được chia sẻ với tôi, ẩn hoàn toàn phần chia sẻ
+        if (widget.calendar.permissionLevel != null &&
+            widget.calendar.permissionLevel!.isNotEmpty) {
+          return const SliverToBoxAdapter(child: SizedBox.shrink());
+        }
         return BlocBuilder<CalendarBloc, CalendarState>(
           builder: (context, state) {
             final owned = _isOwnedId(widget.calendar.id);
             if (!owned) {
-              return const SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 4),
-                  child: Text(
-                    'Lịch được chia sẻ với bạn. Chỉ chủ sở hữu mới xem và chỉnh sửa chia sẻ.',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ),
-              );
+              // Nếu vì lý do nào đó owned=false (không phải lịch của tôi), vẫn ẩn phần chia sẻ
+              return const SliverToBoxAdapter(child: SizedBox.shrink());
             }
 
             if (_sharingUsersLocal.isEmpty) {
@@ -757,6 +787,11 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
           }
           return SliverList(
             delegate: SliverChildBuilderDelegate((context, index) {
+              if (index == state.tasks.length) {
+                return SizedBox(
+                  height: MediaQuery.of(context).padding.bottom + 88,
+                );
+              }
               final task = state.tasks[index];
               return ListTile(
                 leading: Icon(
@@ -796,7 +831,12 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
                               ),
                             ),
                           ).then((result) {
-                            if (result == true) _fetchTasks();
+                            if (result == true) {
+                              _fetchTasks();
+                              if (mounted) {
+                                context.read<HomeBloc>().add(FetchHomeData());
+                              }
+                            }
                           });
                         },
                       ),
@@ -813,7 +853,7 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
                 ),
                 onTap: () => _showTaskDetailDialog(task),
               );
-            }, childCount: state.tasks.length),
+            }, childCount: state.tasks.length + 1),
           );
         }
         if (state is TaskListError) {

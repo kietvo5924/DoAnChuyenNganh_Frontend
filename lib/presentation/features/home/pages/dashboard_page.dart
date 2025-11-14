@@ -64,7 +64,12 @@ class DashboardPage extends StatelessWidget {
           final topTags = tagEntries.take(6).toList();
 
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 16,
+              bottom: MediaQuery.of(context).padding.bottom + 24,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -231,6 +236,7 @@ class DashboardPage extends StatelessWidget {
                         );
                       }).toList(),
                     ),
+                    const SizedBox(height: 8),
                   ],
                 ),
               ],

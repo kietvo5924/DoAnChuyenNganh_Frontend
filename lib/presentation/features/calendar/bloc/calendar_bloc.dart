@@ -16,6 +16,14 @@ import '../../../../domain/calendar/usecases/get_calendars_shared_with_me.dart';
 // THÊM ENTITY
 import 'calendar_event.dart';
 import 'calendar_state.dart';
+// NEW: direct access to task datasources for shared calendars bulk sync
+import 'package:planmate_app/injection.dart';
+import 'package:planmate_app/data/task/datasources/task_remote_data_source.dart';
+import 'package:planmate_app/data/task/datasources/task_local_data_source.dart';
+import 'package:planmate_app/data/task/models/task_model.dart';
+// NEW: persist shared calendars locally so Home sees them (but we will filter when emitting owned list)
+import 'package:planmate_app/data/calendar/datasources/calendar_local_data_source.dart';
+import 'package:planmate_app/data/calendar/models/calendar_model.dart';
 
 class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
   // Use cases cũ
@@ -82,7 +90,7 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
       final local = await _getLocalCalendars();
       local.fold((f) => null, (cals) {
         if (!emit.isDone) {
-          emit(CalendarLoaded(calendars: cals)); // Chỉ emit CalendarLoaded
+          emit(CalendarLoaded(calendars: cals)); // emit tất cả (owned + shared)
         }
       });
       return;
@@ -98,7 +106,7 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
           emit(const CalendarError(message: 'Không thể tải lịch local')),
       (cals) async {
         calendarsLocal = cals;
-        emit(CalendarLoaded(calendars: cals)); // Chỉ emit CalendarLoaded
+        emit(CalendarLoaded(calendars: cals)); // emit full list
       },
     );
 
@@ -122,7 +130,7 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
       (f) => Logger.w('[CalendarBloc] Refresh after sync failed'),
       (cals) {
         if (!emit.isDone) {
-          emit(CalendarLoaded(calendars: cals)); // Chỉ emit CalendarLoaded
+          emit(CalendarLoaded(calendars: cals)); // emit full list
         }
       },
     );
@@ -254,15 +262,61 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
     FetchSharedWithMeCalendars event,
     Emitter<CalendarState> emit,
   ) async {
-    // Không emit Loading để tránh làm tab "Lịch của tôi" bị giật
-    final result = await _getCalendarsSharedWithMe();
-    result.fold(
-      (failure) =>
-          emit(const CalendarError(message: 'Lỗi tải lịch được chia sẻ')),
-      (calendars) {
-        // SỬA ĐỔI: Chỉ emit state riêng cho tab "Được chia sẻ"
-        emit(CalendarSharedWithMeLoaded(calendars: calendars));
-      },
-    );
+    // Không emit Loading để tránh giật UI
+    final either = await _getCalendarsSharedWithMe();
+    if (either.isLeft()) {
+      if (!emit.isDone) {
+        emit(const CalendarError(message: 'Lỗi tải lịch được chia sẻ'));
+      }
+      return;
+    }
+
+    final calendars = either.getOrElse(() => const []);
+
+    // Persist vào local để HomeBloc khi lấy local calendars có thể nhìn thấy
+    try {
+      final localCalDs = getIt<CalendarLocalDataSource>();
+      final models = calendars
+          .map(
+            (c) => CalendarModel(
+              id: c.id,
+              name: c.name,
+              description: c.description,
+              isDefault: c.isDefault,
+              permissionLevel: c.permissionLevel,
+            ),
+          )
+          .toList();
+      await localCalDs.cacheCalendars(models);
+    } catch (e) {
+      Logger.w('[CalendarBloc] persist shared calendars failed: $e');
+    }
+
+    // Tải và cache toàn bộ tasks cho các lịch chia sẻ trước khi emit
+    try {
+      final remote = getIt<TaskRemoteDataSource>();
+      final local = getIt<TaskLocalDataSource>();
+      final List<TaskModel> allModels = [];
+      for (final cal in calendars) {
+        if (cal.id <= 0) continue;
+        try {
+          final models = await remote.getAllTasksInCalendar(cal.id);
+          allModels.addAll(models);
+        } catch (e) {
+          Logger.w(
+            '[CalendarBloc] fetch tasks for shared calendar ${cal.id} failed: $e',
+          );
+        }
+      }
+      if (allModels.isNotEmpty) {
+        await local.cacheTasks(allModels);
+      }
+    } catch (e) {
+      Logger.w('[CalendarBloc] bulk fetch shared calendar tasks failed: $e');
+    }
+
+    if (!emit.isDone) {
+      emit(CalendarSharedWithMeLoaded(calendars: calendars));
+    }
   }
 }
