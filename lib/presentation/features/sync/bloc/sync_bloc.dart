@@ -1,4 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/services/logger.dart';
 import '../../../../domain/calendar/usecases/sync_remote_calendars.dart';
 import '../../../../domain/tag/usecases/sync_remote_tags.dart';
 import '../../../../domain/task/usecases/sync_all_remote_tasks.dart';
@@ -57,11 +58,11 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         bool hasCachedUser = false;
         final cachedResult = await _getCachedUser();
         await cachedResult.fold(
-          (f) async => print('>>> STEP1: cache read failure'),
+          (f) async => Logger.w('STEP1: cache read failure'),
           (user) async {
             if (user != null && !event.forceUserRemote) {
               hasCachedUser = true;
-              print('>>> STEP1: cache hit -> skip remote');
+              Logger.d('STEP1: cache hit -> skip remote');
             }
           },
         );

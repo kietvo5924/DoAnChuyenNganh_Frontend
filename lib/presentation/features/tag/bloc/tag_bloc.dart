@@ -1,4 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/services/logger.dart';
 import '../../../../domain/tag/usecases/delete_tag.dart';
 import '../../../../domain/tag/usecases/get_local_tags.dart';
 import '../../../../domain/tag/usecases/save_tag.dart';
@@ -51,8 +52,8 @@ class TagBloc extends Bloc<TagEvent, TagState> {
 
       final syncResult = await _syncRemoteTags();
       syncResult.fold(
-        (f) => print('[TagBloc] Remote sync failed: ${f.runtimeType}'),
-        (_) => print('[TagBloc] Remote sync success'),
+        (f) => Logger.w('[TagBloc] Remote sync failed: ${f.runtimeType}'),
+        (_) => Logger.i('[TagBloc] Remote sync success'),
       );
 
       final refreshed = await _getLocalTags();

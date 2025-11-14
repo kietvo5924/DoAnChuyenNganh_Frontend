@@ -4,6 +4,7 @@ import '../../../../domain/calendar/entities/calendar_entity.dart';
 import '../bloc/calendar_bloc.dart';
 import '../bloc/calendar_event.dart';
 import '../bloc/calendar_state.dart';
+import '../../../widgets/app_text_field.dart';
 
 class EditCalendarPage extends StatefulWidget {
   final CalendarEntity calendar;
@@ -83,13 +84,10 @@ class _EditCalendarPageState extends State<EditCalendarPage> {
             key: _formKey,
             child: ListView(
               children: [
-                TextFormField(
+                AppTextField(
                   controller: _nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Tên lịch',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) => value!.trim().isEmpty
+                  label: 'Tên lịch',
+                  validator: (value) => value == null || value.trim().isEmpty
                       ? 'Tên lịch không được để trống'
                       : null,
                 ),

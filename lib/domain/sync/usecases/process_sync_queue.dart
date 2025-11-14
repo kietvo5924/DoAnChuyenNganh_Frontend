@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:dartz/dartz.dart';
+import '../../../core/services/logger.dart';
 import 'package:planmate_app/data/tag/models/tag_model.dart';
 import '../../../core/error/failures.dart';
 import '../../../data/sync/datasources/sync_queue_local_data_source.dart';
@@ -37,7 +38,7 @@ class ProcessSyncQueue {
 
     final actions = await localDataSource.getQueuedActions();
     if (actions.isEmpty) return Right(unit);
-    print('Processing ${actions.length} actions in sync queue (phased)...');
+    Logger.i('Processing ${actions.length} actions in sync queue (phased)...');
 
     // NEW: determine final action per TAG (keep only the last one per entityId)
     final Map<int, String> tagFinalAction = {};
@@ -123,7 +124,7 @@ class ProcessSyncQueue {
           if (isDefault) {
             await calendarRemoteDataSource.setDefaultCalendar(created.id);
           }
-          print(
+          Logger.i(
             '[Queue] Created calendar temp=${a.entityId} -> id=${created.id}',
           );
         } else {
@@ -135,7 +136,7 @@ class ProcessSyncQueue {
         calendarChanged = true;
         await localDataSource.deleteQueuedAction(a.id!);
       } catch (e) {
-        print('[Queue] Calendar UPSERT fail id=${a.entityId}: $e');
+        Logger.w('[Queue] Calendar UPSERT fail id=${a.entityId}: $e');
       }
     }
 
@@ -148,7 +149,7 @@ class ProcessSyncQueue {
         calendarChanged = true;
         await localDataSource.deleteQueuedAction(a.id!);
       } catch (e) {
-        print('[Queue] Calendar DELETE fail id=${a.entityId}: $e');
+        Logger.w('[Queue] Calendar DELETE fail id=${a.entityId}: $e');
       }
     }
     for (final a in calendarSetDefault) {
@@ -167,7 +168,7 @@ class ProcessSyncQueue {
           }
         }
       } catch (e) {
-        print('[Queue] Calendar SET_DEFAULT fail id=${a.entityId}: $e');
+        Logger.w('[Queue] Calendar SET_DEFAULT fail id=${a.entityId}: $e');
       }
     }
 
@@ -188,7 +189,9 @@ class ProcessSyncQueue {
             fromId: a.entityId,
             toId: created.id,
           );
-          print('[Queue] Created tag temp=${a.entityId} -> id=${created.id}');
+          Logger.i(
+            '[Queue] Created tag temp=${a.entityId} -> id=${created.id}',
+          );
         } else {
           await tagRemoteDataSource.updateTag(a.entityId, name, color);
           // NEW: also ensure local upsert (in case offline edits were pending)
@@ -200,7 +203,7 @@ class ProcessSyncQueue {
         tagChanged = true;
         await localDataSource.deleteQueuedAction(a.id!);
       } catch (e) {
-        print('[Queue] Tag UPSERT fail id=${a.entityId}: $e');
+        Logger.w('[Queue] Tag UPSERT fail id=${a.entityId}: $e');
       }
     }
 
@@ -219,7 +222,7 @@ class ProcessSyncQueue {
         tagChanged = true;
         await localDataSource.deleteQueuedAction(a.id!);
       } catch (e) {
-        print('[Queue] Tag DELETE fail id=${a.entityId}: $e');
+        Logger.w('[Queue] Tag DELETE fail id=${a.entityId}: $e');
       }
     }
 
@@ -267,7 +270,7 @@ class ProcessSyncQueue {
 
         await localDataSource.deleteQueuedAction(a.id!);
       } catch (e) {
-        print('[Queue] Task UPSERT fail id=${a.entityId}: $e');
+        Logger.w('[Queue] Task UPSERT fail id=${a.entityId}: $e');
       }
     }
 
@@ -288,7 +291,7 @@ class ProcessSyncQueue {
         }
         await localDataSource.deleteQueuedAction(a.id!);
       } catch (e) {
-        print('[Queue] Task DELETE fail id=${a.entityId}: $e');
+        Logger.w('[Queue] Task DELETE fail id=${a.entityId}: $e');
       }
     }
 
@@ -299,7 +302,7 @@ class ProcessSyncQueue {
             .getAllCalendars();
         await calendarLocalDataSource.cacheCalendars(remoteCalendars);
       } catch (e) {
-        print('[ProcessSyncQueue] refresh calendars failed: $e');
+        Logger.w('[ProcessSyncQueue] refresh calendars failed: $e');
       }
     }
     if (tagChanged) {
@@ -307,7 +310,7 @@ class ProcessSyncQueue {
         final remoteTags = await tagRemoteDataSource.getAllTags();
         await tagLocalDataSource.cacheTags(remoteTags);
       } catch (e) {
-        print('[ProcessSyncQueue] refresh tags failed: $e');
+        Logger.w('[ProcessSyncQueue] refresh tags failed: $e');
       }
     }
 

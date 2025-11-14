@@ -4,6 +4,8 @@ import 'package:planmate_app/presentation/features/user/bloc/user_bloc.dart';
 import 'package:planmate_app/presentation/features/user/bloc/user_event.dart';
 import 'package:planmate_app/presentation/features/user/bloc/user_state.dart';
 import '../widgets/change_password_dialog.dart';
+import '../../../widgets/loading_indicator.dart';
+import 'package:planmate_app/domain/user/entities/user_entity.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -13,6 +15,7 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
+  UserEntity? _lastProfile;
   @override
   void initState() {
     super.initState();
@@ -38,6 +41,10 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
       body: BlocListener<UserBloc, UserState>(
         listener: (context, state) {
+          if (state is UserLoaded) {
+            // Lưu lại profile gần nhất để không bị nhảy sang màn hình loading
+            _lastProfile = state.profile;
+          }
           if (state is UserOperationSuccess) {
             if (Navigator.canPop(context))
               Navigator.pop(context); // Đóng dialog
@@ -58,7 +65,11 @@ class _ProfilePageState extends State<ProfilePage> {
         },
         child: BlocBuilder<UserBloc, UserState>(
           builder: (context, state) {
-            if (state is UserLoaded) {
+            final profile = (state is UserLoaded)
+                ? state.profile
+                : _lastProfile;
+
+            if (profile != null) {
               return ListView(
                 padding: const EdgeInsets.all(16.0),
                 children: [
@@ -70,12 +81,12 @@ class _ProfilePageState extends State<ProfilePage> {
                   ListTile(
                     leading: const Icon(Icons.person_outline),
                     title: const Text('Họ và tên'),
-                    subtitle: Text(state.profile.fullName),
+                    subtitle: Text(profile.fullName),
                   ),
                   ListTile(
                     leading: const Icon(Icons.email_outlined),
                     title: const Text('Email'),
-                    subtitle: Text(state.profile.email),
+                    subtitle: Text(profile.email),
                   ),
                   const Divider(height: 32),
                   const Text(
@@ -97,7 +108,8 @@ class _ProfilePageState extends State<ProfilePage> {
                 ],
               );
             }
-            return const Center(child: CircularProgressIndicator());
+
+            return const Center(child: LoadingIndicator());
           },
         ),
       ),

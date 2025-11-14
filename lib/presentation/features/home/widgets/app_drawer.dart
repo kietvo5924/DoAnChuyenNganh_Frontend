@@ -23,6 +23,8 @@ import '../../auth/pages/auth_wrapper.dart';
 import 'package:planmate_app/core/services/navigation_service.dart';
 import 'package:planmate_app/data/auth/repositories/auth_repository_impl.dart';
 import 'package:planmate_app/core/services/notification_service.dart';
+import '../../../widgets/loading_indicator.dart';
+import '../../../../core/services/logger.dart';
 
 class AppDrawer extends StatelessWidget {
   const AppDrawer({super.key});
@@ -150,7 +152,7 @@ class AppDrawer extends StatelessWidget {
 }
 
 Future<void> _handleSignOutFlow(BuildContext context) async {
-  print('[SignOutFlow] START');
+  Logger.i('[SignOutFlow] START');
   // NEW: cancel all local notifications on sign out (guest or logged)
   await getIt<NotificationService>().cancelAllNotifications();
   final nav = NavigationService.navigatorKey.currentState;
@@ -167,7 +169,7 @@ Future<void> _handleSignOutFlow(BuildContext context) async {
       ) ??
       0;
   final totalPending = unsyncedTasks + queueCount;
-  print(
+  Logger.d(
     '[SignOutFlow] pending: unsyncedTasks=$unsyncedTasks queue=$queueCount',
   );
 
@@ -178,9 +180,9 @@ Future<void> _handleSignOutFlow(BuildContext context) async {
     try {
       await db.delete('task_tags_local');
       await db.delete('tags');
-      print('[SignOutFlow] Purged tags tables manually');
+      Logger.i('[SignOutFlow] Purged tags tables manually');
     } catch (e) {
-      print('[SignOutFlow] Purge tags failed: $e');
+      Logger.w('[SignOutFlow] Purge tags failed: $e');
     }
   }
 
@@ -220,7 +222,7 @@ Future<void> _handleSignOutFlow(BuildContext context) async {
 
   Future<void> backfillUnsyncedTasksToQueue() async {
     // Thêm các task is_synced=0 nhưng chưa có UPSERT vào sync_queue
-    print('[SignOutFlow] Backfill unsynced tasks -> queue');
+    Logger.i('[SignOutFlow] Backfill unsynced tasks -> queue');
     final rows = await db.rawQuery('''
       SELECT t.*
       FROM tasks t
@@ -229,7 +231,7 @@ Future<void> _handleSignOutFlow(BuildContext context) async {
       WHERE t.is_synced = 0 AND q.id IS NULL
     ''');
     if (rows.isEmpty) {
-      print('[SignOutFlow] Backfill: nothing to add');
+      Logger.d('[SignOutFlow] Backfill: nothing to add');
       return;
     }
     for (final r in rows) {
@@ -272,20 +274,20 @@ Future<void> _handleSignOutFlow(BuildContext context) async {
         'created_at': DateTime.now().toIso8601String(),
       });
     }
-    print(
+    Logger.i(
       '[SignOutFlow] Backfill added ${rows.length} UPSERT actions to queue',
     );
   }
 
   if (totalPending == 0) {
-    print('[SignOutFlow] No pending -> clear & logout');
+    Logger.i('[SignOutFlow] No pending -> clear & logout');
     await getIt<DatabaseService>().clearAllTables();
     await forceNavigateToLogin(cleared: true);
     return;
   }
 
   final hasNet = await getIt<NetworkInfo>().isConnected;
-  print('[SignOutFlow] hasNet=$hasNet');
+  Logger.d('[SignOutFlow] hasNet=$hasNet');
 
   if (hasNet) {
     // Online: backfill rồi sync
@@ -293,19 +295,20 @@ Future<void> _handleSignOutFlow(BuildContext context) async {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
+      builder: (_) => const Center(child: LoadingIndicator()),
     );
     bool syncOk = true;
     try {
       final result = await getIt<ProcessSyncQueue>()();
       result.fold((l) {
         syncOk = false;
-        print('[SignOutFlow] Queue sync FAILED');
-      }, (_) => print('[SignOutFlow] Queue sync OK'));
+        Logger.w('[SignOutFlow] Queue sync FAILED');
+      }, (_) => Logger.i('[SignOutFlow] Queue sync OK'));
     } catch (e) {
       syncOk = false;
-      print('[SignOutFlow] Queue sync exception: $e');
+      Logger.w('[SignOutFlow] Queue sync exception: $e');
     } finally {
+      if (!context.mounted) return;
       if (Navigator.canPop(context)) Navigator.pop(context);
     }
 
@@ -335,7 +338,7 @@ Future<void> _handleSignOutFlow(BuildContext context) async {
           ) ??
           false;
       if (!proceed) {
-        print('[SignOutFlow] User cancelled after sync failure');
+        Logger.i('[SignOutFlow] User cancelled after sync failure');
         return;
       }
     }
@@ -369,7 +372,7 @@ Future<void> _handleSignOutFlow(BuildContext context) async {
         ) ??
         false;
     if (!confirm) {
-      print('[SignOutFlow] User cancelled offline logout');
+      Logger.i('[SignOutFlow] User cancelled offline logout');
       return;
     }
     await getIt<DatabaseService>().clearAllTables();

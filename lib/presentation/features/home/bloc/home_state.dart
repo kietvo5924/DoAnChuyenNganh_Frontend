@@ -19,11 +19,11 @@ class HomeError extends HomeState {
 
 // Trạng thái thành công, chứa danh sách công việc và thông tin về lịch mặc định
 class HomeLoaded extends HomeState {
-  final List<TaskEntity> tasks;
-  final CalendarEntity defaultCalendar;
+  final List<TaskEntity> tasks; // Tất cả task của mọi calendar
+  final List<CalendarEntity> calendars; // Danh sách calendar để tra tên
 
-  const HomeLoaded({required this.tasks, required this.defaultCalendar});
+  const HomeLoaded({required this.tasks, required this.calendars});
 
   @override
-  List<Object?> get props => [tasks, defaultCalendar];
+  List<Object?> get props => [tasks, calendars];
 }
