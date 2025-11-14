@@ -22,6 +22,8 @@ import 'package:planmate_app/data/task/datasources/task_remote_data_source.dart'
 import 'package:planmate_app/data/task/datasources/task_local_data_source.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_state.dart';
+import '../../../widgets/loading_indicator.dart';
+import '../../../widgets/empty_state.dart';
 
 class CalendarDetailPage extends StatelessWidget {
   final CalendarEntity calendar;
@@ -302,7 +304,7 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
                   leading: CircleAvatar(
                     backgroundColor: Theme.of(
                       context,
-                    ).colorScheme.primary.withOpacity(0.1),
+                    ).colorScheme.primary.withValues(alpha: 0.1),
                     child: Icon(
                       isSingle ? Icons.event_outlined : Icons.repeat,
                       color: Theme.of(context).colorScheme.primary,
@@ -329,9 +331,10 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
                             width: double.infinity,
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.primaryContainer.withOpacity(0.35),
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primaryContainer
+                                  .withValues(alpha: 0.35),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(task.description!.trim()),
@@ -428,7 +431,7 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
                                 label: Text(
                                   t.name.isEmpty ? 'Nhãn #${t.id}' : t.name,
                                 ),
-                                backgroundColor: color.withOpacity(0.9),
+                                backgroundColor: color.withValues(alpha: 0.9),
                                 labelStyle: const TextStyle(
                                   color: Colors.white,
                                 ),
@@ -640,6 +643,7 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
       // show Add FAB only if user can edit this calendar
       floatingActionButton: _canEditCurrentCalendar
           ? FloatingActionButton(
+              tooltip: 'Tạo công việc mới',
               onPressed: () {
                 Navigator.push(
                   context,
@@ -682,9 +686,15 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
             if (_sharingUsersLocal.isEmpty) {
               // Empty list (not shared) is also valid UI; show a hint
               return const SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16.0),
-                  child: Text('Lịch này chưa được chia sẻ với ai.'),
+                child: Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: EmptyState(
+                      icon: Icons.group_outlined,
+                      title: 'Chưa chia sẻ',
+                      message: 'Chia sẻ lịch với người khác để cộng tác.',
+                    ),
+                  ),
                 ),
               );
             }
@@ -736,7 +746,11 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
               child: Center(
                 child: Padding(
                   padding: EdgeInsets.all(16.0),
-                  child: Text('Lịch này chưa có công việc nào.'),
+                  child: EmptyState(
+                    icon: Icons.inbox_outlined,
+                    title: 'Chưa có công việc',
+                    message: 'Thêm công việc mới bằng nút + ở dưới.',
+                  ),
                 ),
               ),
             );
@@ -806,7 +820,7 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
           return SliverToBoxAdapter(child: Center(child: Text(state.message)));
         }
         return const SliverToBoxAdapter(
-          child: Center(child: CircularProgressIndicator()),
+          child: Center(child: LoadingIndicator()),
         );
       },
     );

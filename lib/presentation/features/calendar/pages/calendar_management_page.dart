@@ -15,6 +15,8 @@ import '../../../../domain/calendar/entities/calendar_entity.dart';
 // NEW: auth state to detect guest mode
 import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_state.dart';
+import '../../../widgets/loading_indicator.dart';
+import '../../../widgets/empty_state.dart';
 
 class CalendarManagementPage extends StatefulWidget {
   const CalendarManagementPage({super.key});
@@ -187,12 +189,12 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
                       if (isBusy)
                         Positioned.fill(
                           child: Container(
-                            color: Colors.black.withOpacity(0.05),
+                            color: Colors.black.withValues(alpha: 0.05),
                             child: const Center(
                               child: SizedBox(
-                                width: 40,
-                                height: 40,
-                                child: CircularProgressIndicator(),
+                                width: 32,
+                                height: 32,
+                                child: LoadingIndicator(),
                               ),
                             ),
                           ),
@@ -203,6 +205,7 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
               ),
             ),
             floatingActionButton: FloatingActionButton(
+              tooltip: 'Tạo lịch mới',
               onPressed: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const AddCalendarPage()),
@@ -223,11 +226,17 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
     CalendarState state,
   ) {
     if (calendars.isEmpty && !isBusy && state is! CalendarLoading) {
-      return const Center(child: Text('Bạn chưa có lịch nào.'));
+      return const Center(
+        child: EmptyState(
+          icon: Icons.calendar_today_outlined,
+          title: 'Chưa có lịch',
+          message: 'Tạo lịch mới bằng nút + bên dưới.',
+        ),
+      );
     }
 
     if (calendars.isEmpty && state is CalendarLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: LoadingIndicator());
     }
 
     return RefreshIndicator(
@@ -239,6 +248,7 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
         itemBuilder: (context, index) {
           final calendar = calendars[index];
           return ListTile(
+            key: ValueKey(calendar.id),
             leading: const Icon(Icons.calendar_today_outlined),
             title: Text(calendar.name),
             subtitle: Text(
@@ -300,12 +310,16 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
   ) {
     if (calendars.isEmpty && !isBusy && state is! CalendarLoading) {
       return const Center(
-        child: Text('Chưa có lịch nào được chia sẻ với bạn.'),
+        child: EmptyState(
+          icon: Icons.folder_shared_outlined,
+          title: 'Chưa có lịch được chia sẻ',
+          message: 'Khi được chia sẻ, lịch sẽ xuất hiện tại đây.',
+        ),
       );
     }
 
     if (calendars.isEmpty && state is CalendarLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: LoadingIndicator());
     }
 
     return RefreshIndicator(
@@ -317,6 +331,7 @@ class _CalendarManagementPageState extends State<CalendarManagementPage> {
         itemBuilder: (context, index) {
           final calendar = calendars[index];
           return ListTile(
+            key: ValueKey(calendar.id),
             leading: Icon(
               Icons.folder_shared_outlined,
               color: Theme.of(context).primaryColor,

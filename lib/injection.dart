@@ -312,8 +312,11 @@ Future<void> configureDependencies() async {
   );
 
   getIt.registerFactory(
-    () =>
-        HomeBloc(getLocalCalendars: getIt(), getLocalTasksInCalendar: getIt()),
+    () => HomeBloc(
+      getLocalCalendars: getIt(),
+      getLocalTasksInCalendar: getIt(),
+      getAllLocalTasks: getIt(),
+    ),
   );
   getIt.registerFactory(
     () => AllTasksBloc(

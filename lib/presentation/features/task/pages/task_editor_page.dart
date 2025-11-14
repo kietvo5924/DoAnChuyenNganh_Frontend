@@ -16,6 +16,9 @@ import '../../tag/bloc/tag_event.dart';
 import '../bloc/task_editor_bloc.dart';
 import '../bloc/task_editor_event.dart';
 import '../bloc/task_editor_state.dart';
+import '../../../widgets/app_text_field.dart';
+import '../../../widgets/loading_indicator.dart';
+import '../../../../core/services/logger.dart';
 
 enum RepeatOption { none, daily, weekly, monthly, yearly }
 
@@ -195,7 +198,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
         }
       }
     } catch (e) {
-      print('[TaskEditor] Error load tag mapping: $e');
+      Logger.w('[TaskEditor] Error load tag mapping: $e');
     } finally {
       _tagResolving = false;
       _tagResolvedOnce = true;
@@ -324,6 +327,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
       lastDate: DateTime(2100),
     );
     if (date == null) return;
+    if (!mounted) return;
     if (_isAllDay) {
       setState(() {
         if (isStart)
@@ -338,6 +342,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
       initialTime: isStart ? _startTime : _endTime,
     );
     if (time == null) return;
+    if (!mounted) return;
     setState(() {
       if (isStart) {
         _startDate = date;
@@ -356,6 +361,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
       initialTime: isStart ? _startTime : _endTime,
     );
     if (time == null) return;
+    if (!mounted) return;
     setState(() {
       if (isStart) {
         _startTime = time;
@@ -394,6 +400,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
       ),
     );
     if (ok != true) return;
+    if (!mounted) return;
 
     context.read<TaskEditorBloc>().add(
       DeleteTaskSubmitted(
@@ -463,14 +470,12 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              TextFormField(
+              AppTextField(
                 controller: _titleController,
-                decoration: const InputDecoration(
-                  labelText: 'Tiêu đề',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) =>
-                    value!.trim().isEmpty ? 'Tiêu đề không được trống' : null,
+                label: 'Tiêu đề',
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Tiêu đề không được trống'
+                    : null,
               ),
               const SizedBox(height: 16),
               _buildCalendarSelector(),
@@ -607,7 +612,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
                     title: Text(
                       'Sẽ lặp lại vào ngày ${DateFormat('d MMMM', 'vi_VN').format(_startDate)} mỗi năm.',
                     ),
-                    tileColor: Colors.blue.withOpacity(0.05),
+                    tileColor: Colors.blue.withValues(alpha: 0.05),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                       side: BorderSide(color: Colors.blue.shade100),
@@ -719,7 +724,7 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
           );
         }
         return const ListTile(
-          leading: CircularProgressIndicator(),
+          leading: SizedBox(width: 20, height: 20, child: LoadingIndicator()),
           title: Text('Đang tải danh sách lịch...'),
         );
       },
@@ -882,7 +887,11 @@ class _TaskEditorPageState extends State<TaskEditorPage> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        CircularProgressIndicator(),
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: LoadingIndicator(),
+                        ),
                         SizedBox(width: 20),
                         Text("Đang tải nhãn..."),
                       ],

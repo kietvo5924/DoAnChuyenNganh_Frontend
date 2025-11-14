@@ -1,4 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/services/logger.dart';
 import '../../../../domain/auth/usecases/check_auth_status.dart';
 import '../../../../domain/auth/usecases/sign_in.dart';
 import '../../../../domain/auth/usecases/sign_out.dart';
@@ -34,18 +35,18 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
     on<SignInRequested>((event, emit) async {
       emit(AuthLoading());
-      print('>>> AUTH: SignInRequested email=${event.email}');
+      Logger.i('AUTH: SignInRequested email=${event.email}');
       final result = await _signInUseCase(
         email: event.email,
         password: event.password,
       );
       result.fold(
         (failure) {
-          print('>>> AUTH: SignIn FAILED -> $failure');
+          Logger.w('AUTH: SignIn FAILED -> $failure');
           emit(const AuthFailure(message: 'Email hoặc mật khẩu không đúng.'));
         },
         (_) {
-          print('>>> AUTH: SignIn SUCCESS -> emitting AuthJustLoggedIn');
+          Logger.i('AUTH: SignIn SUCCESS -> emitting AuthJustLoggedIn');
           emit(AuthJustLoggedIn());
         },
       );

@@ -4,6 +4,7 @@ import 'package:planmate_app/presentation/features/user/bloc/user_bloc.dart';
 import 'package:planmate_app/presentation/features/user/bloc/user_event.dart';
 import 'package:planmate_app/presentation/features/user/bloc/user_state.dart';
 import '../widgets/change_password_dialog.dart';
+import '../../../widgets/loading_indicator.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -97,7 +98,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 ],
               );
             }
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: LoadingIndicator());
           },
         ),
       ),

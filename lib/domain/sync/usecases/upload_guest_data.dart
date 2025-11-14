@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../../core/services/logger.dart';
 import '../../../core/services/database_service.dart';
 import '../../../data/sync/datasources/sync_queue_local_data_source.dart';
 import '../../../data/sync/models/sync_queue_item_model.dart';
@@ -121,8 +122,8 @@ class UploadGuestData {
     // 2. Đẩy queue
     final res = await processSyncQueue();
     res.fold(
-      (f) => print('[UploadGuestData] Process queue failed: $f'),
-      (_) => print('[UploadGuestData] Queue processed OK'),
+      (f) => Logger.w('[UploadGuestData] Process queue failed: $f'),
+      (_) => Logger.i('[UploadGuestData] Queue processed OK'),
     );
 
     // 3. Nếu queue sạch -> xóa local thô để tải sạch
@@ -134,11 +135,11 @@ class UploadGuestData {
         await txn.delete('tags');
         await txn.delete('calendars');
       });
-      print(
+      Logger.i(
         '[UploadGuestData] Cleared local (tasks/tags/calendars) post upload',
       );
     } else {
-      print('[UploadGuestData] Skip clearing local (queue still has items)');
+      Logger.d('[UploadGuestData] Skip clearing local (queue still has items)');
     }
   }
 }

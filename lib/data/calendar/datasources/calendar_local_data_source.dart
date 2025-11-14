@@ -1,4 +1,5 @@
 import 'package:sqflite/sqflite.dart';
+import '../../../core/services/logger.dart';
 import '../../../core/services/database_service.dart';
 import '../models/calendar_model.dart';
 
@@ -26,7 +27,7 @@ class CalendarLocalDataSourceImpl implements CalendarLocalDataSource {
   @override
   Future<void> cacheCalendars(List<CalendarModel> calendars) async {
     if (calendars.isEmpty) {
-      print(
+      Logger.d(
         '[CalendarLocal] Remote empty -> skip (preserve existing calendars & tasks)',
       );
       return;
@@ -87,7 +88,7 @@ class CalendarLocalDataSourceImpl implements CalendarLocalDataSource {
             whereArgs: [offlineTempId],
           );
 
-          print(
+          Logger.i(
             '[CalendarLocal] Migrated tempId=$offlineTempId -> realId=${cal.id}, movedTasks=$moved',
           );
         } else {
@@ -121,10 +122,10 @@ class CalendarLocalDataSourceImpl implements CalendarLocalDataSource {
           where: 'id = ?',
           whereArgs: [defaultCal.id],
         );
-        print('[CalendarLocal] Applied remote default id=${defaultCal.id}');
+        Logger.i('[CalendarLocal] Applied remote default id=${defaultCal.id}');
       } else if (prevDefaultId != null) {
         // Giữ nguyên default cũ
-        print(
+        Logger.d(
           '[CalendarLocal] Preserve previous default id=$prevDefaultId (remote did not send one)',
         );
       } else if (calendars.isNotEmpty) {
@@ -136,11 +137,13 @@ class CalendarLocalDataSourceImpl implements CalendarLocalDataSource {
           where: 'id = ?',
           whereArgs: [calendars.first.id],
         );
-        print('[CalendarLocal] Fallback set default id=${calendars.first.id}');
+        Logger.i(
+          '[CalendarLocal] Fallback set default id=${calendars.first.id}',
+        );
       }
     });
 
-    print(
+    Logger.i(
       '[CalendarLocal] Safe upsert ${calendars.length} calendars (no deletions)',
     );
   }
@@ -167,7 +170,7 @@ class CalendarLocalDataSourceImpl implements CalendarLocalDataSource {
         );
       }
     });
-    print(
+    Logger.i(
       '[CalendarLocal] Saved calendar id=${calendar.id} isSynced=$isSynced',
     );
   }
@@ -229,7 +232,7 @@ class CalendarLocalDataSourceImpl implements CalendarLocalDataSource {
         }
       }
     });
-    print('[CalendarLocal] Deleted calendar id=$calendarId');
+    Logger.i('[CalendarLocal] Deleted calendar id=$calendarId');
   }
 
   @override
@@ -244,6 +247,6 @@ class CalendarLocalDataSourceImpl implements CalendarLocalDataSource {
         whereArgs: [calendarId],
       );
     });
-    print('[CalendarLocal] Set default calendar id=$calendarId');
+    Logger.i('[CalendarLocal] Set default calendar id=$calendarId');
   }
 }

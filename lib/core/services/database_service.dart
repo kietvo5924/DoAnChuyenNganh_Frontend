@@ -1,4 +1,5 @@
 import 'package:sqflite/sqflite.dart';
+import 'logger.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -180,6 +181,6 @@ class DatabaseService {
     await db.delete('calendars');
     await db.delete('user_profile');
     await db.delete('sync_queue');
-    print("Local database cleared!");
+    Logger.i("Local database cleared!");
   }
 }

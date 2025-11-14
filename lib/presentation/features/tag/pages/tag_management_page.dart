@@ -6,6 +6,8 @@ import '../bloc/tag_event.dart';
 import '../bloc/tag_state.dart';
 import 'add_tag_page.dart';
 import 'edit_tag_page.dart';
+import '../../../widgets/loading_indicator.dart';
+import '../../../widgets/empty_state.dart';
 
 Color _hexToColor(String hexString) {
   final buffer = StringBuffer();
@@ -76,7 +78,13 @@ class _TagManagementPageState extends State<TagManagementPage> {
           builder: (context, state) {
             if (state is TagLoaded) {
               if (state.tags.isEmpty) {
-                return const Center(child: Text('Bạn chưa có nhãn nào.'));
+                return const Center(
+                  child: EmptyState(
+                    icon: Icons.label_outline,
+                    title: 'Chưa có nhãn',
+                    message: 'Tạo nhãn mới để phân loại công việc.',
+                  ),
+                );
               }
               return RefreshIndicator(
                 onRefresh: () async => context.read<TagBloc>().add(FetchTags()),
@@ -85,6 +93,7 @@ class _TagManagementPageState extends State<TagManagementPage> {
                   itemBuilder: (context, index) {
                     final tag = state.tags[index];
                     return ListTile(
+                      key: ValueKey(tag.id),
                       leading: Icon(
                         Icons.circle,
                         color: _hexToColor(tag.color ?? '#808080'),
@@ -109,11 +118,12 @@ class _TagManagementPageState extends State<TagManagementPage> {
                 ),
               );
             }
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: LoadingIndicator());
           },
         ),
       ),
       floatingActionButton: FloatingActionButton(
+        tooltip: 'Tạo nhãn mới',
         onPressed: () => Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const AddTagPage()),

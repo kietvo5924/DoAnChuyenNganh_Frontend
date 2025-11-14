@@ -1,5 +1,6 @@
 // lib/presentation/features/calendar/bloc/calendar_bloc.dart
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/services/logger.dart';
 import '../../../../core/error/failures.dart'; // Thêm import
 import '../../../../domain/calendar/usecases/get_local_calendars.dart';
 import '../../../../domain/calendar/usecases/sync_remote_calendars.dart';
@@ -110,19 +111,21 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
     // 2. Đồng bộ remote
     final syncResult = await _syncRemoteCalendars();
     syncResult.fold(
-      (f) => print('[CalendarBloc] Skip remote or failure: ${f.runtimeType}'),
-      (_) => print('[CalendarBloc] Remote sync success'),
+      (f) =>
+          Logger.w('[CalendarBloc] Skip remote or failure: ${f.runtimeType}'),
+      (_) => Logger.i('[CalendarBloc] Remote sync success'),
     );
 
     // 3. Refresh sau sync
     final refreshed = await _getLocalCalendars();
-    refreshed.fold((f) => print('[CalendarBloc] Refresh after sync failed'), (
-      cals,
-    ) {
-      if (!emit.isDone) {
-        emit(CalendarLoaded(calendars: cals)); // Chỉ emit CalendarLoaded
-      }
-    });
+    refreshed.fold(
+      (f) => Logger.w('[CalendarBloc] Refresh after sync failed'),
+      (cals) {
+        if (!emit.isDone) {
+          emit(CalendarLoaded(calendars: cals)); // Chỉ emit CalendarLoaded
+        }
+      },
+    );
   }
 
   Future<void> _onSaveCalendarSubmitted(

@@ -6,6 +6,7 @@ import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
 import 'signin_page.dart';
+import '../../../widgets/loading_indicator.dart';
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
@@ -41,7 +42,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
           return const SignInPage();
         }
         // Các trạng thái khác (ví dụ: AuthLoading) -> Hiển thị màn hình chờ
-        return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        return const Scaffold(body: Center(child: LoadingIndicator()));
       },
     );
   }

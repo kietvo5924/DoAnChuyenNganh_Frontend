@@ -5,6 +5,7 @@ import '../../../../domain/tag/entities/tag_entity.dart';
 import '../bloc/tag_bloc.dart';
 import '../bloc/tag_event.dart';
 import '../bloc/tag_state.dart';
+import '../../../widgets/app_text_field.dart';
 
 // Hàm helper để chuyển đổi chuỗi Hex thành Color
 Color _hexToColor(String hexString) {
@@ -115,14 +116,12 @@ class _EditTagPageState extends State<EditTagPage> {
             key: _formKey,
             child: ListView(
               children: [
-                TextFormField(
+                AppTextField(
                   controller: _nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Tên nhãn',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) =>
-                      value!.trim().isEmpty ? 'Tên không được để trống' : null,
+                  label: 'Tên nhãn',
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Tên không được để trống'
+                      : null,
                 ),
                 const SizedBox(height: 24),
                 Row(

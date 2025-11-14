@@ -3,6 +3,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:planmate_app/presentation/features/user/bloc/user_bloc.dart';
 import 'package:planmate_app/presentation/features/user/bloc/user_event.dart';
 import 'package:planmate_app/presentation/features/user/bloc/user_state.dart';
+import '../../../widgets/app_text_field.dart';
+import '../../../widgets/loading_indicator.dart';
 
 class ChangePasswordDialog extends StatefulWidget {
   const ChangePasswordDialog({super.key});
@@ -49,33 +51,31 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TextFormField(
+                  AppTextField(
                     controller: _currentPasswordController,
-                    decoration: const InputDecoration(
-                      labelText: 'Mật khẩu hiện tại',
-                    ),
-                    obscureText: true,
-                    validator: (value) =>
-                        value!.isEmpty ? 'Không được để trống' : null,
+                    label: 'Mật khẩu hiện tại',
+                    obscure: true,
+                    enableToggleObscure: true,
+                    validator: (value) => value == null || value.isEmpty
+                        ? 'Không được để trống'
+                        : null,
                   ),
                   const SizedBox(height: 8),
-                  TextFormField(
+                  AppTextField(
                     controller: _newPasswordController,
-                    decoration: const InputDecoration(
-                      labelText: 'Mật khẩu mới',
-                    ),
-                    obscureText: true,
-                    validator: (value) => (value!.length < 6)
+                    label: 'Mật khẩu mới',
+                    obscure: true,
+                    enableToggleObscure: true,
+                    validator: (value) => (value == null || value.length < 6)
                         ? 'Mật khẩu phải có ít nhất 6 ký tự'
                         : null,
                   ),
                   const SizedBox(height: 8),
-                  TextFormField(
+                  AppTextField(
                     controller: _confirmPasswordController,
-                    decoration: const InputDecoration(
-                      labelText: 'Xác nhận mật khẩu mới',
-                    ),
-                    obscureText: true,
+                    label: 'Xác nhận mật khẩu mới',
+                    obscure: true,
+                    enableToggleObscure: true,
                     validator: (value) => value != _newPasswordController.text
                         ? 'Mật khẩu xác nhận không khớp'
                         : null,
@@ -90,7 +90,7 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
               child: const Text('Hủy'),
             ),
             if (state is UserLoading)
-              const CircularProgressIndicator()
+              const SizedBox(width: 24, height: 24, child: LoadingIndicator())
             else
               ElevatedButton(onPressed: _submit, child: const Text('Lưu')),
           ],
