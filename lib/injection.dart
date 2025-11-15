@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:get_it/get_it.dart';
+import 'package:planmate_app/presentation/features/chatbot/bloc/chatbot_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // Core
@@ -27,6 +28,9 @@ import 'data/task/repositories/task_repository_impl.dart';
 import 'data/user/datasources/user_local_data_source.dart';
 import 'data/user/datasources/user_remote_data_source.dart';
 import 'data/user/repositories/user_repository_impl.dart';
+// Chatbot data
+import 'data/chatbot/datasources/chatbot_remote_data_source.dart';
+import 'data/chatbot/repositories/chatbot_repository_impl.dart';
 
 // Domain Layer
 import 'domain/auth/repositories/auth_repository.dart';
@@ -67,6 +71,9 @@ import 'domain/user/usecases/change_password.dart';
 import 'domain/user/usecases/get_cached_user.dart';
 import 'domain/user/usecases/sync_user_profile.dart';
 import 'domain/notification/usecases/reschedule_all_notifications.dart';
+// Chatbot domain
+import 'domain/chatbot/repositories/chatbot_repository.dart';
+import 'domain/chatbot/usecases/send_chat_message.dart';
 
 // Presentation Layer (BLoCs)
 import 'presentation/features/auth/bloc/auth_bloc.dart';
@@ -150,6 +157,10 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton<SyncQueueLocalDataSource>(
     () => SyncQueueLocalDataSourceImpl(dbService: getIt()),
   );
+  // Chatbot
+  getIt.registerLazySingleton<ChatbotRemoteDataSource>(
+    () => ChatbotRemoteDataSourceImpl(dio: getIt()),
+  );
 
   // == Repositories ==
   getIt.registerLazySingleton<AuthRepository>(
@@ -193,6 +204,10 @@ Future<void> configureDependencies() async {
       prefs: getIt(),
       notificationService: getIt(),
     ),
+  );
+  // Chatbot
+  getIt.registerLazySingleton<ChatbotRepository>(
+    () => ChatbotRepositoryImpl(remoteDataSource: getIt()),
   );
 
   // == Use Cases ==
@@ -259,6 +274,8 @@ Future<void> configureDependencies() async {
       dbService: getIt(),
     ),
   );
+  // Chatbot UseCases
+  getIt.registerLazySingleton(() => SendChatMessage(getIt()));
 
   // == BLoCs ==
   getIt.registerFactory(
@@ -336,6 +353,10 @@ Future<void> configureDependencies() async {
       processSyncQueue: getIt(),
       uploadGuestData: getIt(),
     ),
+  );
+  // Keep chatbot memory alive during app lifetime
+  getIt.registerLazySingleton<ChatbotBloc>(
+    () => ChatbotBloc(sendChatMessage: getIt()),
   );
 
   // Auto process sync when network is back
