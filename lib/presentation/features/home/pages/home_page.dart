@@ -24,6 +24,12 @@ import '../../calendar/bloc/calendar_state.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../auth/bloc/auth_state.dart';
 import '../../../../domain/calendar/entities/calendar_entity.dart';
+// Chatbot page
+import '../../chatbot/pages/chatbot_page.dart';
+// Sync bloc để đồng bộ lại dữ liệu (bao gồm công việc AI vừa tạo)
+import '../../sync/bloc/sync_bloc.dart';
+import '../../sync/bloc/sync_event.dart';
+import '../../sync/bloc/sync_state.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -40,6 +46,7 @@ class _HomePageState extends State<HomePage> {
   int? _selectedCalendarId;
   int? _selectedTagId;
   bool _calendarCollapsed = false; // Collapse the calendar grid, not filters
+  bool _postLoginReloadDone = false; // đảm bảo chỉ reload 1 lần sau đăng nhập
 
   // Check if a task occurs on a specific calendar day.
   bool _occursOn(TaskEntity t, DateTime day) {
@@ -256,6 +263,29 @@ class _HomePageState extends State<HomePage> {
         title: const Text('Trang chủ'),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            tooltip: 'Trợ lý AI',
+            icon: const Icon(Icons.smart_toy_outlined),
+            onPressed: () {
+              Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => ChatbotPage())).then((
+                _,
+              ) async {
+                if (!mounted) return;
+                // Sau khi thoát chatbot: đồng bộ nhanh để lấy task AI mới tạo
+                // Thực hiện đồng bộ chỉ khi không có sync đang chạy
+                final syncState = context.read<SyncBloc>().state;
+                if (syncState is! SyncInProgress) {
+                  context.read<SyncBloc>().add(const StartInitialSync());
+                } else {
+                  // Nếu đang sync, vẫn sẽ có listener bên dưới xử lý thành công
+                }
+              });
+            },
+          ),
+        ],
       ),
       drawer: const AppDrawer(),
       body: MultiBlocListener(
@@ -276,7 +306,10 @@ class _HomePageState extends State<HomePage> {
                 // timeout hoặc lỗi: vẫn tiếp tục
               }
               if (!mounted) return;
-              context.read<HomeBloc>().add(FetchHomeData());
+              if (!_postLoginReloadDone) {
+                context.read<HomeBloc>().add(FetchHomeData());
+                _postLoginReloadDone = true; // đánh dấu đã reload 1 lần
+              }
               // Nếu đang chọn một calendar đã biến mất sau login thì reset
               if (_selectedCalendarId != null) {
                 final homeState = context.read<HomeBloc>().state;
@@ -295,9 +328,19 @@ class _HomePageState extends State<HomePage> {
             listener: (context, calState) {
               // Tránh refetch thừa nếu Home đang loading
               final homeBloc = context.read<HomeBloc>();
-              if (homeBloc.state is! HomeLoading) {
+              // Chỉ refetch nếu chưa từng reload sau đăng nhập (lần đầu) hoặc không phải do login
+              if (!_postLoginReloadDone && homeBloc.state is! HomeLoading) {
                 homeBloc.add(FetchHomeData());
+                _postLoginReloadDone = true;
               }
+            },
+          ),
+          // Khi đồng bộ hoàn tất, reload Home để hiển thị công việc mới (bao gồm AI tạo)
+          BlocListener<SyncBloc, SyncState>(
+            listenWhen: (prev, curr) => curr is SyncSuccess,
+            listener: (context, syncState) {
+              if (!mounted) return;
+              context.read<HomeBloc>().add(FetchHomeData());
             },
           ),
         ],
