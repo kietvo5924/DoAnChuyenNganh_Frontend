@@ -94,7 +94,7 @@ class AppDrawer extends StatelessWidget {
               ),
               ListTile(
                 leading: const Icon(Icons.dashboard_outlined),
-                title: const Text('Bảng điều khiển'),
+                title: const Text('Tổng quan & Thống kê'),
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(

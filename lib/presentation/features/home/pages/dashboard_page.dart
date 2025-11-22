@@ -15,7 +15,7 @@ class DashboardPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bảng điều khiển'),
+        title: const Text('Tổng quan và thống kê'),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
       ),

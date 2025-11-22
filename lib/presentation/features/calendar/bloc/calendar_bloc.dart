@@ -264,10 +264,10 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
   ) async {
     // Không emit Loading để tránh giật UI
     final either = await _getCalendarsSharedWithMe();
+    // OFFLINE/FAILURE: Đừng đổi state sang Error để không che mất lịch local
+    // Chỉ tiếp tục khi lấy được danh sách từ remote
     if (either.isLeft()) {
-      if (!emit.isDone) {
-        emit(const CalendarError(message: 'Lỗi tải lịch được chia sẻ'));
-      }
+      Logger.w('[CalendarBloc] Fetch shared calendars failed (non-fatal)');
       return;
     }
 
