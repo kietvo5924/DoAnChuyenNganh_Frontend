@@ -61,12 +61,20 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
     final calBloc = context.read<CalendarBloc>();
     calBloc.add(InitializeCalendarDetail(calendar: widget.calendar));
 
+    if ((widget.calendar.permissionLevel ?? '').isEmpty) {
+      _ownedCalendarIds.add(widget.calendar.id);
+    }
+
     // NEW: seed owned IDs immediately if calendars already loaded
     final st = calBloc.state;
     if (st is CalendarLoaded) {
       _ownedCalendarIds
         ..clear()
-        ..addAll(st.calendars.map((c) => c.id));
+        ..addAll(
+          st.calendars
+              .where((c) => (c.permissionLevel ?? '').isEmpty)
+              .map((c) => c.id),
+        );
     } else {
       calBloc.add(FetchCalendars());
     }
@@ -96,6 +104,12 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
     if (_isOwnedId(widget.calendar.id)) return true;
     final p = (widget.calendar.permissionLevel ?? '').toString().toUpperCase();
     return p == 'EDIT';
+  }
+
+  bool get _isSharedCalendarForReporting {
+    if (_isOwnedId(widget.calendar.id)) return false;
+    final permission = widget.calendar.permissionLevel;
+    return permission != null && permission.isNotEmpty;
   }
 
   // Fetch sharing users directly into local cache
@@ -224,6 +238,70 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
           },
         );
       },
+    );
+  }
+
+  void _showReportAbuseDialog() {
+    final reasonController = TextEditingController();
+    final descriptionController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Báo cáo lịch vi phạm'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: reasonController,
+                decoration: const InputDecoration(
+                  labelText: 'Lý do',
+                  hintText: 'Nhập lý do ngắn gọn',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: descriptionController,
+                decoration: const InputDecoration(
+                  labelText: 'Mô tả chi tiết (tuỳ chọn)',
+                ),
+                maxLines: 4,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Hủy'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final reason = reasonController.text.trim();
+              final description = descriptionController.text.trim();
+              if (reason.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Vui lòng nhập lý do báo cáo'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              context.read<CalendarBloc>().add(
+                ReportCalendarAbuseRequested(
+                  calendarId: widget.calendar.id,
+                  reason: reason,
+                  description: description.isEmpty ? null : description,
+                ),
+              );
+              Navigator.pop(dialogContext);
+            },
+            child: const Text('Gửi báo cáo'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -509,27 +587,41 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
       appBar: AppBar(
         title: Text(widget.calendar.name),
         actions: [
-          // Hide share button for guest
           BlocBuilder<AuthBloc, AuthState>(
             builder: (context, authState) {
-              if (authState is AuthGuestSuccess) {
+              final isGuest = authState is AuthGuestSuccess;
+              if (isGuest) {
                 return const SizedBox.shrink();
               }
-              // Ẩn nút share nếu lịch là lịch được chia sẻ với tôi (permissionLevel != null)
-              if (widget.calendar.permissionLevel != null &&
-                  widget.calendar.permissionLevel!.isNotEmpty) {
-                return const SizedBox.shrink();
-              }
-              return BlocBuilder<CalendarBloc, CalendarState>(
-                builder: (context, state) {
-                  final owned = _isOwnedId(widget.calendar.id);
-                  if (!owned) return const SizedBox.shrink();
-                  return IconButton(
+
+              final actionWidgets = <Widget>[];
+              if (_isOwnedId(widget.calendar.id)) {
+                actionWidgets.add(
+                  IconButton(
                     icon: const Icon(Icons.share_outlined),
                     onPressed: _showShareDialog,
                     tooltip: 'Chia sẻ lịch',
-                  );
-                },
+                  ),
+                );
+              }
+
+              if (_isSharedCalendarForReporting) {
+                actionWidgets.add(
+                  IconButton(
+                    icon: const Icon(Icons.report_problem_outlined),
+                    tooltip: 'Báo cáo vi phạm',
+                    onPressed: _showReportAbuseDialog,
+                  ),
+                );
+              }
+
+              if (actionWidgets.isEmpty) {
+                return const SizedBox.shrink();
+              }
+
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: actionWidgets,
               );
             },
           ),
@@ -592,7 +684,11 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
               if (state is CalendarLoaded) {
                 _ownedCalendarIds
                   ..clear()
-                  ..addAll(state.calendars.map((c) => c.id));
+                  ..addAll(
+                    state.calendars
+                        .where((c) => (c.permissionLevel ?? '').isEmpty)
+                        .map((c) => c.id),
+                  );
                 if (_isOwnedId(widget.calendar.id)) {
                   context.read<CalendarBloc>().add(
                     FetchSharingUsers(calendarId: widget.calendar.id),

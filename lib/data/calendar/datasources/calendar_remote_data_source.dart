@@ -24,6 +24,11 @@ abstract class CalendarRemoteDataSource {
     int calendarId,
   ); // Giả sử bạn có UserModel
   Future<List<CalendarModel>> getCalendarsSharedWithMe();
+  Future<void> reportCalendarAbuse(
+    int calendarId,
+    String reason, {
+    String? description,
+  });
 }
 
 class CalendarRemoteDataSourceImpl implements CalendarRemoteDataSource {
@@ -119,5 +124,22 @@ class CalendarRemoteDataSourceImpl implements CalendarRemoteDataSource {
     return (response.data as List)
         .map((json) => CalendarModel.fromJson(json))
         .toList();
+  }
+
+  @override
+  Future<void> reportCalendarAbuse(
+    int calendarId,
+    String reason, {
+    String? description,
+  }) async {
+    await dio.post(
+      '${ApiConfig.baseUrl}/calendar-reports',
+      data: {
+        'calendarId': calendarId,
+        'reason': reason,
+        if (description != null && description.isNotEmpty)
+          'description': description,
+      },
+    );
   }
 }

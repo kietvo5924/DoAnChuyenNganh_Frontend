@@ -13,6 +13,7 @@ import '../../../../domain/calendar/usecases/share_calendar.dart';
 import '../../../../domain/calendar/usecases/unshare_calendar.dart';
 import '../../../../domain/calendar/usecases/get_users_sharing_calendar.dart';
 import '../../../../domain/calendar/usecases/get_calendars_shared_with_me.dart';
+import '../../../../domain/calendar/usecases/report_calendar_abuse.dart';
 // THÊM ENTITY
 import 'calendar_event.dart';
 import 'calendar_state.dart';
@@ -39,6 +40,7 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
   final UnshareCalendar _unshareCalendar;
   final GetUsersSharingCalendar _getUsersSharingCalendar;
   final GetCalendarsSharedWithMe _getCalendarsSharedWithMe;
+  final ReportCalendarAbuse _reportCalendarAbuse;
 
   CalendarBloc({
     // Cũ
@@ -53,6 +55,7 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
     required UnshareCalendar unshareCalendar,
     required GetUsersSharingCalendar getUsersSharingCalendar,
     required GetCalendarsSharedWithMe getCalendarsSharedWithMe,
+    required ReportCalendarAbuse reportCalendarAbuse,
   }) : _getLocalCalendars = getLocalCalendars,
        _syncRemoteCalendars = syncRemoteCalendars,
        _saveCalendar = saveCalendar,
@@ -64,6 +67,7 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
        _unshareCalendar = unshareCalendar,
        _getUsersSharingCalendar = getUsersSharingCalendar,
        _getCalendarsSharedWithMe = getCalendarsSharedWithMe,
+       _reportCalendarAbuse = reportCalendarAbuse,
        super(CalendarInitial()) {
     // Các handler cũ
     on<FetchCalendars>(_onFetchCalendars);
@@ -77,6 +81,7 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
     on<UnshareCalendarRequested>(_onUnshareCalendar);
     on<FetchSharingUsers>(_onFetchSharingUsers);
     on<FetchSharedWithMeCalendars>(_onFetchSharedWithMeCalendars);
+    on<ReportCalendarAbuseRequested>(_onReportCalendarAbuse);
   }
 
   // --- HÀM XỬ LÝ EVENT CŨ ---
@@ -318,5 +323,28 @@ class CalendarBloc extends Bloc<CalendarEvent, CalendarState> {
     if (!emit.isDone) {
       emit(CalendarSharedWithMeLoaded(calendars: calendars));
     }
+  }
+
+  Future<void> _onReportCalendarAbuse(
+    ReportCalendarAbuseRequested event,
+    Emitter<CalendarState> emit,
+  ) async {
+    emit(CalendarOperationInProgress());
+    final result = await _reportCalendarAbuse(
+      calendarId: event.calendarId,
+      reason: event.reason,
+      description: event.description,
+    );
+    result.fold(
+      (failure) {
+        final message = failure is ServerFailure && failure.message != null
+            ? failure.message!
+            : 'Gửi báo cáo thất bại';
+        emit(CalendarError(message: message));
+      },
+      (_) {
+        emit(const CalendarOperationSuccess(message: 'Đã gửi báo cáo vi phạm'));
+      },
+    );
   }
 }

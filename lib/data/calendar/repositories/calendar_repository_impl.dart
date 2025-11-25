@@ -294,4 +294,31 @@ class CalendarRepositoryImpl implements CalendarRepository {
       return Left(NetworkFailure());
     }
   }
+
+  @override
+  Future<Either<Failure, Unit>> reportCalendarAbuse(
+    int calendarId,
+    String reason, {
+    String? description,
+  }) async {
+    if (await networkInfo.isConnected && _hasToken()) {
+      try {
+        await remoteDataSource.reportCalendarAbuse(
+          calendarId,
+          reason,
+          description: description,
+        );
+        return Right(unit);
+      } on DioException catch (e) {
+        final dynamic data = e.response?.data;
+        final message = data is Map<String, dynamic>
+            ? data['message']?.toString()
+            : e.message;
+        return Left(ServerFailure(message: message));
+      } catch (_) {
+        return Left(ServerFailure());
+      }
+    }
+    return Left(NetworkFailure());
+  }
 }
