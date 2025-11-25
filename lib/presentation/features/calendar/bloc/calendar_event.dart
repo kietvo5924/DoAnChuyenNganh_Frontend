@@ -69,6 +69,20 @@ class ShareCalendarRequested extends CalendarEvent {
   List<Object?> get props => [calendarId, email, permissionLevel];
 }
 
+class ReportCalendarAbuseRequested extends CalendarEvent {
+  final int calendarId;
+  final String reason;
+  final String? description;
+  const ReportCalendarAbuseRequested({
+    required this.calendarId,
+    required this.reason,
+    this.description,
+  });
+
+  @override
+  List<Object?> get props => [calendarId, reason, description];
+}
+
 class UnshareCalendarRequested extends CalendarEvent {
   final int calendarId;
   final int userId;

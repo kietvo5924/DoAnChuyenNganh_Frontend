@@ -264,25 +264,37 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         actions: [
-          IconButton(
-            tooltip: 'Trợ lý AI',
-            icon: const Icon(Icons.smart_toy_outlined),
-            onPressed: () {
-              Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => ChatbotPage())).then((
-                _,
-              ) async {
-                if (!mounted) return;
-                // Sau khi thoát chatbot: đồng bộ nhanh để lấy task AI mới tạo
-                // Thực hiện đồng bộ chỉ khi không có sync đang chạy
-                final syncState = context.read<SyncBloc>().state;
-                if (syncState is! SyncInProgress) {
-                  context.read<SyncBloc>().add(const StartInitialSync());
-                } else {
-                  // Nếu đang sync, vẫn sẽ có listener bên dưới xử lý thành công
-                }
-              });
+          BlocBuilder<AuthBloc, AuthState>(
+            builder: (context, state) {
+              // Logic: Kiểm tra xem có phải là User thật (đã đăng nhập) hay không
+              // Dựa trên file auth_state.dart của bạn:
+              final bool isLoggedIn =
+                  state is AuthJustLoggedIn || state is AuthAlreadyLoggedIn;
+
+              if (isLoggedIn) {
+                // Nếu đã đăng nhập -> Hiển thị nút Chatbot
+                return IconButton(
+                  tooltip: 'Trợ lý AI',
+                  icon: const Icon(Icons.smart_toy_outlined),
+                  onPressed: () {
+                    Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => ChatbotPage()))
+                        .then((_) async {
+                          if (!mounted) return;
+                          // Logic đồng bộ cũ của bạn giữ nguyên
+                          final syncState = context.read<SyncBloc>().state;
+                          if (syncState is! SyncInProgress) {
+                            context.read<SyncBloc>().add(
+                              const StartInitialSync(),
+                            );
+                          }
+                        });
+                  },
+                );
+              }
+
+              // Nếu là Khách (AuthGuestSuccess) hoặc trạng thái khác -> Ẩn nút (trả về widget rỗng)
+              return const SizedBox.shrink();
             },
           ),
         ],

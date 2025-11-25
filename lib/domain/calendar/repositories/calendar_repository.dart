@@ -19,4 +19,9 @@ abstract class CalendarRepository {
     int calendarId,
   ); // Trả về UserEntity
   Future<Either<Failure, List<CalendarEntity>>> getCalendarsSharedWithMe();
+  Future<Either<Failure, Unit>> reportCalendarAbuse(
+    int calendarId,
+    String reason, {
+    String? description,
+  });
 }

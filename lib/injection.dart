@@ -50,6 +50,7 @@ import 'domain/calendar/usecases/get_calendars_shared_with_me.dart';
 import 'domain/calendar/usecases/get_users_sharing_calendar.dart';
 import 'domain/calendar/usecases/share_calendar.dart';
 import 'domain/calendar/usecases/unshare_calendar.dart';
+import 'domain/calendar/usecases/report_calendar_abuse.dart';
 // KẾT THÚC THÊM MỚI
 
 import 'domain/sync/usecases/process_sync_queue.dart';
@@ -233,6 +234,7 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(() => UnshareCalendar(getIt()));
   getIt.registerLazySingleton(() => GetUsersSharingCalendar(getIt()));
   getIt.registerLazySingleton(() => GetCalendarsSharedWithMe(getIt()));
+  getIt.registerLazySingleton(() => ReportCalendarAbuse(getIt()));
   // KẾT THÚC THÊM MỚI
 
   // Tag
@@ -309,6 +311,7 @@ Future<void> configureDependencies() async {
       unshareCalendar: getIt(),
       getUsersSharingCalendar: getIt(),
       getCalendarsSharedWithMe: getIt(),
+      reportCalendarAbuse: getIt(),
     ),
   );
   // KẾT THÚC THAY ĐỔI
