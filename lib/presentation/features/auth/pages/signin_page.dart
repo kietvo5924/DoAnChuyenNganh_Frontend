@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:planmate_app/core/services/session_invalidation_service.dart';
+import 'package:planmate_app/injection.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
@@ -19,6 +22,32 @@ class _SignInPageState extends State<SignInPage> {
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isFormValid = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final prefs = getIt<SharedPreferences>();
+    final reason = prefs.getString(kForcedLogoutReasonKey);
+    if (reason != null && reason.trim().isNotEmpty) {
+      prefs.remove(kForcedLogoutReasonKey);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Bạn đã bị đăng xuất'),
+            content: Text(reason),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      });
+    }
+  }
 
   @override
   void dispose() {

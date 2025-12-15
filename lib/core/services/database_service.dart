@@ -32,6 +32,7 @@ class DatabaseService {
         // Ensure new columns exist for older DBs before any local writes
         await _ensureCalendarsPermissionColumn(db);
         await _ensureTaskPreDayColumn(db);
+        await _ensureTaskOccurrenceCompletionTable(db);
       },
     );
   }
@@ -121,6 +122,20 @@ class DatabaseService {
         FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
       )
     ''');
+
+    // NEW: per-day completion status for both SINGLE and RECURRING tasks
+    await db.execute('''
+      CREATE TABLE task_occurrence_completions (
+        calendar_id INTEGER NOT NULL,
+        task_id INTEGER NOT NULL,
+        task_type TEXT NOT NULL,
+        occurrence_date TEXT NOT NULL,
+        completed INTEGER NOT NULL DEFAULT 1,
+        is_synced INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (task_type, task_id, occurrence_date)
+      )
+    ''');
   }
 
   // NEW: add column pre_day_notify for existing DBs
@@ -154,6 +169,26 @@ class DatabaseService {
       }
     } catch (_) {
       // ignore migration failures
+    }
+  }
+
+  // NEW: ensure task_occurrence_completions table exists for older DBs
+  Future<void> _ensureTaskOccurrenceCompletionTable(Database db) async {
+    try {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS task_occurrence_completions (
+          calendar_id INTEGER NOT NULL,
+          task_id INTEGER NOT NULL,
+          task_type TEXT NOT NULL,
+          occurrence_date TEXT NOT NULL,
+          completed INTEGER NOT NULL DEFAULT 1,
+          is_synced INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (task_type, task_id, occurrence_date)
+        )
+      ''');
+    } catch (_) {
+      // ignore
     }
   }
 

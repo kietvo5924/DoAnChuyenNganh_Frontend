@@ -9,7 +9,23 @@ abstract class TaskListEvent extends Equatable {
 
 class FetchTasksInCalendar extends TaskListEvent {
   final int calendarId;
-  const FetchTasksInCalendar({required this.calendarId});
+  final DateTime? date;
+  const FetchTasksInCalendar({required this.calendarId, this.date});
+}
+
+class ToggleTaskCompletionForDate extends TaskListEvent {
+  final TaskEntity task;
+  final DateTime date;
+  final bool completed;
+
+  const ToggleTaskCompletionForDate({
+    required this.task,
+    required this.date,
+    required this.completed,
+  });
+
+  @override
+  List<Object> get props => [task, date, completed];
 }
 
 class DeleteTaskFromList extends TaskListEvent {

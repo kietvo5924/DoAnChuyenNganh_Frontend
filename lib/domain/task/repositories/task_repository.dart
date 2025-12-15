@@ -1,6 +1,7 @@
 import 'package:dartz/dartz.dart';
 import '../../../core/error/failures.dart';
 import '../entities/task_entity.dart';
+import '../entities/task_occurrence_completion.dart';
 
 abstract class TaskRepository {
   Future<Either<Failure, List<TaskEntity>>> getLocalTasksInCalendar(
@@ -14,5 +15,20 @@ abstract class TaskRepository {
   Future<Either<Failure, Unit>> deleteTask({
     required int taskId,
     required String type,
+  });
+
+  Future<Either<Failure, Unit>> setTaskOccurrenceCompleted({
+    required int calendarId,
+    required int taskId,
+    required String taskType, // SINGLE | RECURRING
+    required DateTime date,
+    required bool completed,
+  });
+
+  Future<Either<Failure, List<TaskOccurrenceCompletion>>>
+  getTaskOccurrenceCompletions({
+    required int calendarId,
+    required DateTime from,
+    required DateTime to,
   });
 }

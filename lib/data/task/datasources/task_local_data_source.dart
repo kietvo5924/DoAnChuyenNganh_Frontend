@@ -12,6 +12,7 @@ abstract class TaskLocalDataSource {
   // --- Bổ sung ---
   Future<void> saveTask(TaskModel task, {required bool isSynced});
   Future<void> deleteTask(int taskId);
+  Future<void> migrateTaskId({required int fromId, required int toId});
 }
 
 class TaskLocalDataSourceImpl implements TaskLocalDataSource {
@@ -351,6 +352,34 @@ class TaskLocalDataSourceImpl implements TaskLocalDataSource {
     // Xóa task trong bảng chính, các liên kết trong task_tags_local sẽ tự động được xóa
     // nhờ có `ON DELETE CASCADE` trong câu lệnh CREATE TABLE.
     await db.delete(_taskTable, where: 'id = ?', whereArgs: [taskId]);
+  }
+
+  @override
+  Future<void> migrateTaskId({required int fromId, required int toId}) async {
+    final db = await dbService.database;
+    await db.transaction((txn) async {
+      // Update main task row PK
+      await txn.execute(
+        'UPDATE $_taskTable SET id = ?, is_synced = 1 WHERE id = ?',
+        [toId, fromId],
+      );
+
+      // Update tag mapping table
+      await txn.execute(
+        'UPDATE $_taskTagTable SET task_id = ? WHERE task_id = ?',
+        [toId, fromId],
+      );
+
+      // Also update any pending occurrence completion rows
+      try {
+        await txn.execute(
+          'UPDATE task_occurrence_completions SET task_id = ? WHERE task_id = ?',
+          [toId, fromId],
+        );
+      } catch (_) {
+        // ignore if table missing
+      }
+    });
   }
 
   // REMOVE: placeholder calendar creator to avoid polluting "Lịch của tôi"

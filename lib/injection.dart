@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api/dio_interceptor.dart';
 import 'core/network/network_info.dart';
 import 'core/services/database_service.dart';
+import 'core/services/session_invalidation_service.dart';
 import 'core/services/notification_service.dart';
 
 // Data Layer
@@ -24,6 +25,7 @@ import 'data/tag/datasources/tag_remote_data_source.dart';
 import 'data/tag/repositories/tag_repository_impl.dart';
 import 'data/task/datasources/task_local_data_source.dart';
 import 'data/task/datasources/task_remote_data_source.dart';
+import 'data/task/datasources/task_occurrence_completion_local_data_source.dart';
 import 'data/task/repositories/task_repository_impl.dart';
 import 'data/user/datasources/user_local_data_source.dart';
 import 'data/user/datasources/user_remote_data_source.dart';
@@ -65,7 +67,9 @@ import 'domain/task/repositories/task_repository.dart';
 import 'domain/task/usecases/delete_task.dart';
 import 'domain/task/usecases/get_all_local_tasks.dart';
 import 'domain/task/usecases/get_local_tasks_in_calendar.dart';
+import 'domain/task/usecases/get_task_occurrence_completions.dart';
 import 'domain/task/usecases/save_task.dart';
+import 'domain/task/usecases/set_task_occurrence_completed.dart';
 import 'domain/task/usecases/sync_all_remote_tasks.dart';
 import 'domain/user/repositories/user_repository.dart';
 import 'domain/user/usecases/change_password.dart';
@@ -97,6 +101,10 @@ Future<void> configureDependencies() async {
   // == External ==
   final sharedPreferences = await SharedPreferences.getInstance();
   getIt.registerLazySingleton(() => sharedPreferences);
+  getIt.registerLazySingleton<DatabaseService>(() => DatabaseService.instance);
+  getIt.registerLazySingleton<SessionInvalidationService>(
+    () => SessionInvalidationService(prefs: getIt(), db: getIt()),
+  );
   getIt.registerLazySingleton(() {
     final dio = Dio();
     // NEW: avoid redirect loops and let client handle 302 as an error
@@ -104,7 +112,10 @@ Future<void> configureDependencies() async {
     dio.options.maxRedirects = 0;
     dio
       ..interceptors.add(
-        DioInterceptor(sharedPreferences: getIt()),
+        DioInterceptor(
+          sharedPreferences: getIt(),
+          sessionInvalidationService: getIt(),
+        ),
       ) // Interceptor thêm token
       ..interceptors.add(
         LogInterceptor(
@@ -119,7 +130,6 @@ Future<void> configureDependencies() async {
     return dio;
   });
   getIt.registerLazySingleton(() => Connectivity());
-  getIt.registerLazySingleton<DatabaseService>(() => DatabaseService.instance);
 
   // == Core ==
   getIt.registerLazySingleton<NetworkInfo>(() => NetworkInfoImpl(getIt()));
@@ -154,6 +164,9 @@ Future<void> configureDependencies() async {
   );
   getIt.registerLazySingleton<TaskLocalDataSource>(
     () => TaskLocalDataSourceImpl(dbService: getIt()),
+  );
+  getIt.registerLazySingleton<TaskOccurrenceCompletionLocalDataSource>(
+    () => TaskOccurrenceCompletionLocalDataSourceImpl(dbService: getIt()),
   );
   getIt.registerLazySingleton<SyncQueueLocalDataSource>(
     () => SyncQueueLocalDataSourceImpl(dbService: getIt()),
@@ -199,6 +212,7 @@ Future<void> configureDependencies() async {
     () => TaskRepositoryImpl(
       remoteDataSource: getIt(),
       localDataSource: getIt(),
+      occurrenceLocalDataSource: getIt(),
       calendarRepository: getIt(),
       networkInfo: getIt(),
       syncQueueLocalDataSource: getIt(),
@@ -249,6 +263,8 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton(() => SyncAllRemoteTasks(getIt()));
   getIt.registerLazySingleton(() => SaveTask(getIt()));
   getIt.registerLazySingleton(() => DeleteTask(getIt()));
+  getIt.registerLazySingleton(() => SetTaskOccurrenceCompleted(getIt()));
+  getIt.registerLazySingleton(() => GetTaskOccurrenceCompletions(getIt()));
 
   // Sync
   getIt.registerLazySingleton(
@@ -256,6 +272,7 @@ Future<void> configureDependencies() async {
       localDataSource: getIt(),
       taskRemoteDataSource: getIt(),
       taskLocalDataSource: getIt(),
+      occurrenceLocalDataSource: getIt(),
       calendarRemoteDataSource: getIt(),
       calendarLocalDataSource: getIt(),
       tagRemoteDataSource: getIt(),
@@ -325,7 +342,12 @@ Future<void> configureDependencies() async {
     ),
   );
   getIt.registerFactory(
-    () => TaskListBloc(getLocalTasksInCalendar: getIt(), deleteTask: getIt()),
+    () => TaskListBloc(
+      getLocalTasksInCalendar: getIt(),
+      deleteTask: getIt(),
+      getCompletions: getIt(),
+      setCompletion: getIt(),
+    ),
   );
   getIt.registerFactory(
     () => TaskEditorBloc(saveTask: getIt(), deleteTask: getIt()),
@@ -343,6 +365,8 @@ Future<void> configureDependencies() async {
       getLocalCalendars: getIt(),
       getAllLocalTasks: getIt(),
       getCalendarsSharedWithMe: getIt(),
+      getCompletions: getIt(),
+      setCompletion: getIt(),
     ),
   );
   getIt.registerFactory(

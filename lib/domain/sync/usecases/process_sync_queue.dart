@@ -6,6 +6,8 @@ import '../../../core/error/failures.dart';
 import '../../../data/sync/datasources/sync_queue_local_data_source.dart';
 import '../../../data/task/datasources/task_remote_data_source.dart';
 import '../../../data/task/datasources/task_local_data_source.dart'; // NEW
+import '../../../data/task/datasources/task_occurrence_completion_local_data_source.dart';
+import '../../../data/task/models/task_occurrence_completion_model.dart';
 import '../../../data/calendar/datasources/calendar_remote_data_source.dart';
 import '../../../data/calendar/datasources/calendar_local_data_source.dart';
 import '../../../data/tag/datasources/tag_remote_data_source.dart';
@@ -15,6 +17,7 @@ class ProcessSyncQueue {
   final SyncQueueLocalDataSource localDataSource;
   final TaskRemoteDataSource taskRemoteDataSource;
   final TaskLocalDataSource taskLocalDataSource; // NEW
+  final TaskOccurrenceCompletionLocalDataSource occurrenceLocalDataSource;
   final CalendarRemoteDataSource calendarRemoteDataSource;
   final CalendarLocalDataSource calendarLocalDataSource;
   final TagRemoteDataSource tagRemoteDataSource;
@@ -24,6 +27,7 @@ class ProcessSyncQueue {
     required this.localDataSource,
     required this.taskRemoteDataSource,
     required this.taskLocalDataSource, // NEW
+    required this.occurrenceLocalDataSource,
     required this.calendarRemoteDataSource,
     required this.calendarLocalDataSource,
     required this.tagRemoteDataSource,
@@ -64,6 +68,7 @@ class ProcessSyncQueue {
     final tagDeletes = <dynamic>[];
     final taskUpsertMap = <int, dynamic>{};
     final taskDeletes = <dynamic>[];
+    final occurrenceUpsertMap = <int, dynamic>{};
 
     for (final a in actions) {
       switch (a.entityType) {
@@ -93,15 +98,22 @@ class ProcessSyncQueue {
             taskDeletes.add(a);
           }
           break;
+        case 'TASK_OCCURRENCE':
+          if (a.action == 'UPSERT') {
+            occurrenceUpsertMap[a.entityId] = a;
+          }
+          break;
       }
     }
 
     final calendarUpserts = calendarUpsertMap.values.toList();
     final tagUpserts = tagUpsertMap.values.toList();
     final taskUpserts = taskUpsertMap.values.toList();
+    final occurrenceUpserts = occurrenceUpsertMap.values.toList();
 
     final Map<int, int> calendarIdMap = {}; // tempId -> realId
     final Map<int, int> tagIdMap = {}; // tempId -> realId
+    final Map<int, int> taskIdMap = {}; // tempId -> realId
 
     bool calendarChanged = false;
     bool tagChanged = false;
@@ -257,15 +269,19 @@ class ProcessSyncQueue {
         final isNew = a.entityId <= 0;
 
         // POST or PUT to server
-        await taskRemoteDataSource.saveTask(
+        final createdOrUpdated = await taskRemoteDataSource.saveTask(
           calendarId: calendarId,
           taskId: isNew ? null : a.entityId,
           taskData: taskData,
         );
 
-        // NEW: if this was created from a temp local task, remove temp to avoid duplicates
-        if (isNew) {
-          await taskLocalDataSource.deleteTask(a.entityId);
+        // NEW: if this was created from a temp local task, migrate temp id -> real id
+        if (isNew && createdOrUpdated != null) {
+          taskIdMap[a.entityId] = createdOrUpdated.id;
+          await taskLocalDataSource.migrateTaskId(
+            fromId: a.entityId,
+            toId: createdOrUpdated.id,
+          );
         }
 
         await localDataSource.deleteQueuedAction(a.id!);
@@ -292,6 +308,48 @@ class ProcessSyncQueue {
         await localDataSource.deleteQueuedAction(a.id!);
       } catch (e) {
         Logger.w('[Queue] Task DELETE fail id=${a.entityId}: $e');
+      }
+    }
+
+    // 6b. TASK OCCURRENCE UPSERT (completion)
+    for (final a in occurrenceUpserts) {
+      try {
+        if (a.payload == null) {
+          await localDataSource.deleteQueuedAction(a.id!);
+          continue;
+        }
+        final data = jsonDecode(a.payload!) as Map<String, dynamic>;
+        int taskId = (data['taskId'] as num).toInt();
+        final int calendarId = (data['calendarId'] as num).toInt();
+        final String taskType = (data['taskType'] as String).toUpperCase();
+        final String occurrenceDate = data['occurrenceDate'] as String;
+        final bool completed = data['completed'] == true;
+
+        if (taskId <= 0 && taskIdMap.containsKey(taskId)) {
+          taskId = taskIdMap[taskId]!;
+        }
+
+        await taskRemoteDataSource.setOccurrenceCompleted(
+          taskId: taskId,
+          taskType: taskType,
+          date: occurrenceDate,
+          completed: completed,
+        );
+
+        await occurrenceLocalDataSource.upsertCompletion(
+          TaskOccurrenceCompletionModel(
+            calendarId: calendarId,
+            taskId: taskId,
+            taskType: taskType,
+            occurrenceDate: occurrenceDate,
+            completed: completed,
+          ),
+          isSynced: true,
+        );
+
+        await localDataSource.deleteQueuedAction(a.id!);
+      } catch (e) {
+        Logger.w('[Queue] Task OCCURRENCE UPSERT fail: $e');
       }
     }
 

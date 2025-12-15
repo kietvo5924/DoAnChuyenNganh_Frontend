@@ -4,11 +4,13 @@ import 'dart:async'; // keep: needed for timeout on stream await
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
+import 'package:planmate_app/injection.dart';
 import '../widgets/app_drawer.dart';
 import '../bloc/home_bloc.dart';
 import '../bloc/home_event.dart';
 import '../bloc/home_state.dart';
 import '../../../../domain/task/entities/task_entity.dart';
+import '../../../../domain/task/usecases/get_task_occurrence_completions.dart';
 import '../../../widgets/loading_indicator.dart';
 import '../../../widgets/empty_state.dart';
 import '../../../widgets/section_header.dart';
@@ -41,6 +43,11 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late DateTime _focusedDay;
   DateTime? _selectedDay;
+
+  // Read-only completion status for selected day on Home
+  final Set<String> _completedKeys = {};
+  String? _loadedCompletionsKey; // `${yyyy-MM-dd}|${sortedCalendarIds}`
+  bool _loadingCompletions = false;
 
   // NEW: filter selections
   int? _selectedCalendarId;
@@ -101,6 +108,80 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {
       return const [];
     }
+  }
+
+  String _dateKey(DateTime d) => DateFormat('yyyy-MM-dd').format(d.toLocal());
+
+  String _completionKey({
+    required String taskType,
+    required int taskId,
+    required String dateKey,
+  }) {
+    return '${taskType.toUpperCase()}|$taskId|$dateKey';
+  }
+
+  void _maybeLoadCompletionsForSelection({
+    required DateTime day,
+    required Set<int> calendarIds,
+  }) {
+    final dateKey = _dateKey(day);
+    final ids = calendarIds.toList()..sort();
+    final desiredKey = '$dateKey|${ids.join(",")}';
+    if (_loadingCompletions) return;
+    if (_loadedCompletionsKey == desiredKey) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _loadCompletionsForDay(
+        day: day,
+        calendarIds: calendarIds,
+        desiredKey: desiredKey,
+      );
+    });
+  }
+
+  Future<void> _loadCompletionsForDay({
+    required DateTime day,
+    required Set<int> calendarIds,
+    required String desiredKey,
+  }) async {
+    if (calendarIds.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _completedKeys.clear();
+        _loadedCompletionsKey = desiredKey;
+        _loadingCompletions = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _loadingCompletions = true;
+      _completedKeys.clear();
+    });
+
+    final keys = <String>{};
+    final getCompletions = getIt<GetTaskOccurrenceCompletions>();
+    for (final calId in calendarIds) {
+      final res = await getCompletions(calendarId: calId, from: day, to: day);
+      res.fold((_) {}, (list) {
+        for (final c in list) {
+          if (c.completed != true) continue;
+          keys.add(
+            '${c.taskType.toUpperCase()}|${c.taskId}|${c.occurrenceDate}',
+          );
+        }
+      });
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _completedKeys
+        ..clear()
+        ..addAll(keys);
+      _loadedCompletionsKey = desiredKey;
+      _loadingCompletions = false;
+    });
   }
 
   @override
@@ -393,6 +474,15 @@ class _HomePageState extends State<HomePage> {
                   : const <TaskEntity>[];
               final displayTasks = selectedTasks;
 
+              final selectedDayLocal = (_selectedDay ?? _focusedDay).toLocal();
+              final calendarIdsForDay = displayTasks
+                  .map((t) => t.calendarId)
+                  .toSet();
+              _maybeLoadCompletionsForSelection(
+                day: selectedDayLocal,
+                calendarIds: calendarIdsForDay,
+              );
+
               return Column(
                 children: [
                   _buildFilterBar(state),
@@ -528,9 +618,11 @@ class _HomePageState extends State<HomePage> {
                             ),
                           )
                         : ListView.separated(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
+                            padding: EdgeInsets.fromLTRB(
+                              12,
+                              8,
+                              12,
+                              MediaQuery.of(context).padding.bottom + 88,
                             ),
                             itemCount: displayTasks.length,
                             separatorBuilder: (_, __) =>
@@ -540,6 +632,15 @@ class _HomePageState extends State<HomePage> {
                               final safeCalName =
                                   nameMap[t.calendarId] ??
                                   '(Lịch #${t.calendarId})';
+                              final taskType = (t.repeatType == RepeatType.NONE)
+                                  ? 'SINGLE'
+                                  : 'RECURRING';
+                              final key = _completionKey(
+                                taskType: taskType,
+                                taskId: t.id,
+                                dateKey: _dateKey(selectedDayLocal),
+                              );
+                              final isCompleted = _completedKeys.contains(key);
                               return Card(
                                 child: ListTile(
                                   key: ValueKey(t.id),
@@ -550,7 +651,9 @@ class _HomePageState extends State<HomePage> {
                                     color: Colors.blue,
                                   ),
                                   title: Text(t.title),
-                                  subtitle: Text('Lịch: $safeCalName'),
+                                  subtitle: Text(
+                                    'Lịch: $safeCalName • ${isCompleted ? 'Đã hoàn thành' : 'Chưa hoàn thành'}',
+                                  ),
                                   onTap: () =>
                                       _showTaskDetailDialog(t, safeCalName),
                                 ),

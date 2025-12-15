@@ -9,18 +9,23 @@ import 'package:planmate_app/data/auth/repositories/auth_repository_impl.dart';
 import 'package:planmate_app/core/services/notification_service.dart';
 import 'package:planmate_app/injection.dart';
 import 'package:planmate_app/domain/notification/usecases/reschedule_all_notifications.dart';
+import 'package:planmate_app/core/utils/hashing.dart';
 import '../../../core/error/failures.dart';
 import '../../../core/network/network_info.dart';
 import '../../../domain/calendar/repositories/calendar_repository.dart';
 import '../../../domain/task/entities/task_entity.dart';
 import '../../../domain/task/repositories/task_repository.dart';
+import '../../../domain/task/entities/task_occurrence_completion.dart';
 import '../datasources/task_local_data_source.dart';
 import '../datasources/task_remote_data_source.dart';
+import '../datasources/task_occurrence_completion_local_data_source.dart';
+import '../models/task_occurrence_completion_model.dart';
 import '../models/task_model.dart';
 
 class TaskRepositoryImpl implements TaskRepository {
   final TaskRemoteDataSource remoteDataSource;
   final TaskLocalDataSource localDataSource;
+  final TaskOccurrenceCompletionLocalDataSource occurrenceLocalDataSource;
   final CalendarRepository calendarRepository;
   final NetworkInfo networkInfo;
   final SyncQueueLocalDataSource syncQueueLocalDataSource;
@@ -30,12 +35,15 @@ class TaskRepositoryImpl implements TaskRepository {
   TaskRepositoryImpl({
     required this.remoteDataSource,
     required this.localDataSource,
+    required this.occurrenceLocalDataSource,
     required this.calendarRepository,
     required this.networkInfo,
     required this.syncQueueLocalDataSource,
     required SharedPreferences prefs, // NEW
     required this.notificationService, // NEW
   }) : _prefs = prefs; // NEW
+
+  String _toYmd(DateTime d) => DateFormat('yyyy-MM-dd').format(d.toLocal());
 
   bool _hasToken() {
     final t = _prefs.getString(kAuthTokenKey);
@@ -343,5 +351,133 @@ class TaskRepositoryImpl implements TaskRepository {
       ),
     );
     return Right(unit);
+  }
+
+  @override
+  Future<Either<Failure, Unit>> setTaskOccurrenceCompleted({
+    required int calendarId,
+    required int taskId,
+    required String taskType,
+    required DateTime date,
+    required bool completed,
+  }) async {
+    final hasToken = _hasToken();
+    final isOnline = await networkInfo.isConnected;
+    final onlineAndAuthed = hasToken && isOnline;
+
+    final ymd = _toYmd(date);
+    final type = taskType.toUpperCase();
+
+    // Always update local first (optimistic)
+    final localModel = TaskOccurrenceCompletionModel(
+      calendarId: calendarId,
+      taskId: taskId,
+      taskType: type,
+      occurrenceDate: ymd,
+      completed: completed,
+    );
+
+    // Store completion row even when completed=false so offline "uncomplete" can sync.
+    await occurrenceLocalDataSource.upsertCompletion(
+      localModel,
+      isSynced: onlineAndAuthed,
+    );
+
+    if (onlineAndAuthed) {
+      try {
+        await remoteDataSource.setOccurrenceCompleted(
+          taskId: taskId,
+          taskType: type,
+          date: ymd,
+          completed: completed,
+        );
+        // mark as synced (or keep row as-is)
+        await occurrenceLocalDataSource.upsertCompletion(
+          localModel,
+          isSynced: true,
+        );
+        return Right(unit);
+      } on DioException catch (e) {
+        if (_isAuthRedirectOrUnauthorized(e)) {
+          // fall back to queue
+        } else {
+          return Left(ServerFailure());
+        }
+      } catch (_) {
+        return Left(ServerFailure());
+      }
+    }
+
+    // Offline / guest / auth-failed: queue for later
+    final key = '$calendarId|$type|$taskId|$ymd';
+    final entityId = fnv1a32(key);
+    final payload = jsonEncode({
+      'calendarId': calendarId,
+      'taskId': taskId,
+      'taskType': type,
+      'occurrenceDate': ymd,
+      'completed': completed,
+    });
+    await syncQueueLocalDataSource.addAction(
+      SyncQueueItemModel(
+        entityType: 'TASK_OCCURRENCE',
+        entityId: entityId,
+        action: 'UPSERT',
+        payload: payload,
+      ),
+    );
+    return Right(unit);
+  }
+
+  @override
+  Future<Either<Failure, List<TaskOccurrenceCompletion>>>
+  getTaskOccurrenceCompletions({
+    required int calendarId,
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    try {
+      final hasToken = _hasToken();
+      final isOnline = await networkInfo.isConnected;
+      final onlineAndAuthed = hasToken && isOnline;
+      final f = _toYmd(from);
+      final t = _toYmd(to);
+
+      if (onlineAndAuthed) {
+        try {
+          final remote = await remoteDataSource.getOccurrenceCompletions(
+            calendarId: calendarId,
+            from: f,
+            to: t,
+          );
+          // Remote fetch succeeded: make local synced view match server.
+          // Keep unsynced local changes (is_synced=0) intact.
+          await occurrenceLocalDataSource
+              .deleteSyncedCompletionsForCalendarRange(
+                calendarId: calendarId,
+                from: f,
+                to: t,
+              );
+          for (final c in remote) {
+            await occurrenceLocalDataSource.upsertCompletion(c, isSynced: true);
+          }
+        } on DioException catch (e) {
+          if (_isAuthRedirectOrUnauthorized(e)) {
+            // silent fallback to local
+          }
+        } catch (_) {
+          // silent fallback to local
+        }
+      }
+
+      final local = await occurrenceLocalDataSource.getCompletionsForCalendar(
+        calendarId: calendarId,
+        from: f,
+        to: t,
+      );
+      return Right(local);
+    } catch (_) {
+      return Left(CacheFailure());
+    }
   }
 }
