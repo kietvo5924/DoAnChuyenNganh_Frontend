@@ -53,6 +53,7 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
   List<UserEntity> _sharingUsersLocal = [];
   // NEW: cache owned calendar IDs to avoid race with bloc state changes
   final Set<int> _ownedCalendarIds = {};
+  DateTime _selectedDate = DateTime.now();
 
   @override
   void initState() {
@@ -79,7 +80,7 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
       calBloc.add(FetchCalendars());
     }
 
-    _fetchTasks();
+    _fetchTasks(date: _selectedDate);
 
     // NEW: refresh sharing users right away (no need to wait for CalendarLoaded)
     _refreshSharingUsersIfOwned();
@@ -90,10 +91,59 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
     });
   }
 
-  void _fetchTasks() {
+  void _fetchTasks({DateTime? date}) {
+    final d = (date ?? _selectedDate).toLocal();
+    _selectedDate = d;
     context.read<TaskListBloc>().add(
-      FetchTasksInCalendar(calendarId: widget.calendar.id),
+      FetchTasksInCalendar(calendarId: widget.calendar.id, date: d),
     );
+  }
+
+  bool _occursOn(TaskEntity t, DateTime day) {
+    final d = DateTime(day.year, day.month, day.day);
+    if (t.repeatType == RepeatType.NONE) {
+      final start = (t.startTime ?? t.sortDate).toLocal();
+      final end = (t.endTime ?? start).toLocal();
+      final s = DateTime(start.year, start.month, start.day);
+      final e = DateTime(end.year, end.month, end.day);
+      return !d.isBefore(s) && !d.isAfter(e);
+    }
+    final start = (t.repeatStart ?? t.sortDate).toLocal();
+    final end = (t.repeatEnd ?? DateTime(2100, 12, 31)).toLocal();
+    final s = DateTime(start.year, start.month, start.day);
+    final e = DateTime(end.year, end.month, end.day);
+    if (d.isBefore(s) || d.isAfter(e)) return false;
+    final interval = (t.repeatInterval ?? 1).clamp(1, 1000);
+    switch (t.repeatType) {
+      case RepeatType.DAILY:
+        final daysDiff = d.difference(s).inDays;
+        return daysDiff % interval == 0;
+      case RepeatType.WEEKLY:
+        final days = _parseRepeatDays(t.repeatDays);
+        if (!days.contains(d.weekday)) return false;
+        final weeksDiff = d.difference(s).inDays ~/ 7;
+        return weeksDiff % interval == 0;
+      case RepeatType.MONTHLY:
+        final dom = t.repeatDayOfMonth ?? s.day;
+        if (d.day != dom) return false;
+        final monthsDiff = (d.year - s.year) * 12 + (d.month - s.month);
+        return monthsDiff % interval == 0;
+      case RepeatType.YEARLY:
+        if (d.month != s.month || d.day != s.day) return false;
+        final yearsDiff = d.year - s.year;
+        return yearsDiff % interval == 0;
+      case RepeatType.NONE:
+        return false;
+    }
+  }
+
+  List<int> _parseRepeatDays(String? jsonStr) {
+    if (jsonStr == null || jsonStr.trim().isEmpty) return const [];
+    try {
+      return (jsonDecode(jsonStr) as List).cast<int>();
+    } catch (_) {
+      return const [];
+    }
   }
 
   // Helper: ownership via cached IDs
@@ -758,6 +808,39 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
                   ),
                 ),
               ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.event_outlined),
+                          label: Text(
+                            DateFormat(
+                              'EEEE, dd/MM/yyyy',
+                              'vi_VN',
+                            ).format(_selectedDate),
+                          ),
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: _selectedDate,
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(2100, 12, 31),
+                              locale: const Locale('vi', 'VN'),
+                            );
+                            if (picked != null && mounted) {
+                              setState(() => _selectedDate = picked);
+                              _fetchTasks(date: picked);
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               _buildTasksList(),
             ],
           ),
@@ -867,6 +950,7 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
     return BlocBuilder<TaskListBloc, TaskListState>(
       builder: (context, state) {
         if (state is TaskListLoaded) {
+          final selectedDate = DateTime.tryParse(state.date) ?? DateTime.now();
           if (state.tasks.isEmpty) {
             return const SliverToBoxAdapter(
               child: Center(
@@ -889,64 +973,45 @@ class _CalendarDetailPageViewState extends State<_CalendarDetailPageView> {
                 );
               }
               final task = state.tasks[index];
+              final taskType = (task.repeatType == RepeatType.NONE)
+                  ? 'SINGLE'
+                  : 'RECURRING';
+              final occurs = _occursOn(task, selectedDate);
+              final canToggle = _canEditCurrentCalendar && occurs;
+              final checked = state.isCompleted(
+                taskType: taskType,
+                taskId: task.id,
+              );
               return ListTile(
-                leading: Icon(
-                  task.repeatType == RepeatType.NONE
-                      ? Icons.check_box_outline_blank
-                      : Icons.repeat,
-                  color: Theme.of(context).primaryColor,
+                leading: Checkbox(
+                  value: checked,
+                  onChanged: canToggle
+                      ? (v) {
+                          context.read<TaskListBloc>().add(
+                            ToggleTaskCompletionForDate(
+                              task: task,
+                              date: selectedDate,
+                              completed: v == true,
+                            ),
+                          );
+                        }
+                      : null,
                 ),
                 title: Text(task.title),
                 subtitle: Text(
-                  task.repeatType == RepeatType.NONE
-                      ? 'Bắt đầu: ${DateFormat('HH:mm dd/MM/yyyy').format(task.startTime!.toLocal())}'
-                      : 'Bắt đầu từ: ${DateFormat('dd/MM/yyyy').format(task.repeatStart!)}',
+                  '${task.repeatType == RepeatType.NONE ? 'Bắt đầu: ${DateFormat('HH:mm dd/MM/yyyy').format(task.startTime!.toLocal())}' : 'Bắt đầu từ: ${DateFormat('dd/MM/yyyy').format(task.repeatStart!)}'}'
+                  ' • ${!occurs ? 'Không diễn ra ngày này' : (checked ? 'Đã hoàn thành' : 'Chưa hoàn thành')}',
                 ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: 'Xem chi tiết',
-                      icon: const Icon(Icons.info_outline, color: Colors.grey),
-                      onPressed: () => _showTaskDetailDialog(task),
-                    ),
-                    if (_canEditCurrentCalendar) ...[
-                      IconButton(
-                        icon: const Icon(
-                          Icons.edit_outlined,
-                          color: Colors.grey,
-                        ),
-                        tooltip: 'Sửa',
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => TaskEditorPage(
-                                calendar: widget.calendar,
-                                taskToEdit: task,
-                              ),
-                            ),
-                          ).then((result) {
-                            if (result == true) {
-                              _fetchTasks();
-                              if (mounted) {
-                                context.read<HomeBloc>().add(FetchHomeData());
-                              }
-                            }
-                          });
-                        },
-                      ),
-                      IconButton(
+                trailing: _canEditCurrentCalendar
+                    ? IconButton(
                         icon: const Icon(
                           Icons.delete_outline,
                           color: Colors.grey,
                         ),
                         tooltip: 'Xóa',
                         onPressed: () => _showDeleteConfirmationDialog(task),
-                      ),
-                    ],
-                  ],
-                ),
+                      )
+                    : null,
                 onTap: () => _showTaskDetailDialog(task),
               );
             }, childCount: state.tasks.length + 1),

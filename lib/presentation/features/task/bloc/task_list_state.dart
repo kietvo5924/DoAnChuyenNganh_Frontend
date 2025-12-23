@@ -13,7 +13,18 @@ class TaskListLoading extends TaskListState {}
 
 class TaskListLoaded extends TaskListState {
   final List<TaskEntity> tasks;
-  const TaskListLoaded({required this.tasks});
+  final String date; // yyyy-MM-dd
+  final Set<String> completedKeys; // key: TASKTYPE|TASKID|DATE
+
+  const TaskListLoaded({
+    required this.tasks,
+    required this.date,
+    required this.completedKeys,
+  });
+
+  bool isCompleted({required String taskType, required int taskId}) {
+    return completedKeys.contains('${taskType.toUpperCase()}|$taskId|$date');
+  }
 }
 
 class TaskListOperationSuccess extends TaskListState {

@@ -1,6 +1,10 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../domain/task/usecases/delete_task.dart';
+import '../../../../domain/task/entities/task_entity.dart';
 import '../../../../domain/task/usecases/get_local_tasks_in_calendar.dart';
+import '../../../../domain/task/usecases/get_task_occurrence_completions.dart';
+import '../../../../domain/task/usecases/set_task_occurrence_completed.dart';
+import 'package:intl/intl.dart';
 import 'task_list_event.dart';
 import 'task_list_state.dart';
 
@@ -14,15 +18,24 @@ import 'package:planmate_app/core/services/database_service.dart';
 class TaskListBloc extends Bloc<TaskListEvent, TaskListState> {
   final GetLocalTasksInCalendar _getLocalTasksInCalendar;
   final DeleteTask _deleteTask;
+  final GetTaskOccurrenceCompletions _getCompletions;
+  final SetTaskOccurrenceCompleted _setCompletion;
 
   TaskListBloc({
     required GetLocalTasksInCalendar getLocalTasksInCalendar,
     required DeleteTask deleteTask,
+    required GetTaskOccurrenceCompletions getCompletions,
+    required SetTaskOccurrenceCompleted setCompletion,
   }) : _getLocalTasksInCalendar = getLocalTasksInCalendar,
        _deleteTask = deleteTask,
+       _getCompletions = getCompletions,
+       _setCompletion = setCompletion,
        super(TaskListInitial()) {
     on<FetchTasksInCalendar>((event, emit) async {
       emit(TaskListLoading());
+
+      final date = (event.date ?? DateTime.now()).toLocal();
+      final ymd = DateFormat('yyyy-MM-dd').format(date);
 
       // NEW: if this calendar id is NOT in local "calendars" table,
       // treat it as "shared-with-me" and fetch remote first.
@@ -47,7 +60,30 @@ class TaskListBloc extends Bloc<TaskListEvent, TaskListState> {
             return result2.fold(
               (_) =>
                   emit(const TaskListError(message: 'Tải công việc thất bại')),
-              (tasks2) => emit(TaskListLoaded(tasks: tasks2)),
+              (tasks2) async {
+                final compsRes = await _getCompletions(
+                  calendarId: event.calendarId,
+                  from: date,
+                  to: date,
+                );
+                final completedKeys = compsRes.fold<Set<String>>(
+                  (_) => <String>{},
+                  (items) => items
+                      .where((e) => e.completed)
+                      .map(
+                        (e) =>
+                            '${e.taskType.toUpperCase()}|${e.taskId}|${e.occurrenceDate}',
+                      )
+                      .toSet(),
+                );
+                emit(
+                  TaskListLoaded(
+                    tasks: tasks2,
+                    date: ymd,
+                    completedKeys: completedKeys,
+                  ),
+                );
+              },
             );
           } catch (_) {
             // fall through to normal flow if remote-first fails
@@ -80,7 +116,30 @@ class TaskListBloc extends Bloc<TaskListEvent, TaskListState> {
                   (_) => emit(
                     const TaskListError(message: 'Tải công việc thất bại'),
                   ),
-                  (tasks2) => emit(TaskListLoaded(tasks: tasks2)),
+                  (tasks2) async {
+                    final compsRes = await _getCompletions(
+                      calendarId: event.calendarId,
+                      from: date,
+                      to: date,
+                    );
+                    final completedKeys = compsRes.fold<Set<String>>(
+                      (_) => <String>{},
+                      (items) => items
+                          .where((e) => e.completed)
+                          .map(
+                            (e) =>
+                                '${e.taskType.toUpperCase()}|${e.taskId}|${e.occurrenceDate}',
+                          )
+                          .toSet(),
+                    );
+                    emit(
+                      TaskListLoaded(
+                        tasks: tasks2,
+                        date: ymd,
+                        completedKeys: completedKeys,
+                      ),
+                    );
+                  },
                 );
                 return;
               }
@@ -88,7 +147,75 @@ class TaskListBloc extends Bloc<TaskListEvent, TaskListState> {
               // silent; fall through to emit empty state
             }
           }
-          emit(TaskListLoaded(tasks: tasks));
+          // Load completion keys for this calendar/date
+          final compsRes = await _getCompletions(
+            calendarId: event.calendarId,
+            from: date,
+            to: date,
+          );
+          final completedKeys = compsRes.fold<Set<String>>(
+            (_) => <String>{},
+            (items) => items
+                .where((e) => e.completed)
+                .map(
+                  (e) =>
+                      '${e.taskType.toUpperCase()}|${e.taskId}|${e.occurrenceDate}',
+                )
+                .toSet(),
+          );
+          emit(
+            TaskListLoaded(
+              tasks: tasks,
+              date: ymd,
+              completedKeys: completedKeys,
+            ),
+          );
+        },
+      );
+    });
+
+    on<ToggleTaskCompletionForDate>((event, emit) async {
+      final current = state;
+      if (current is! TaskListLoaded) return;
+      final ymd = DateFormat('yyyy-MM-dd').format(event.date.toLocal());
+      final taskType = (event.task.repeatType == RepeatType.NONE)
+          ? 'SINGLE'
+          : 'RECURRING';
+      final key = '$taskType|${event.task.id}|$ymd';
+
+      // optimistic update
+      final nextKeys = Set<String>.from(current.completedKeys);
+      if (event.completed) {
+        nextKeys.add(key);
+      } else {
+        nextKeys.remove(key);
+      }
+      emit(
+        TaskListLoaded(
+          tasks: current.tasks,
+          date: current.date,
+          completedKeys: nextKeys,
+        ),
+      );
+
+      final res = await _setCompletion(
+        calendarId: event.task.calendarId,
+        taskId: event.task.id,
+        taskType: taskType,
+        date: event.date,
+        completed: event.completed,
+      );
+      res.fold(
+        (_) =>
+            emit(const TaskListError(message: 'Cập nhật trạng thái thất bại')),
+        (_) {
+          // refresh completions for day
+          add(
+            FetchTasksInCalendar(
+              calendarId: event.task.calendarId,
+              date: event.date,
+            ),
+          );
         },
       );
     });

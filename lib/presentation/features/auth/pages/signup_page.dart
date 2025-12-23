@@ -5,6 +5,7 @@ import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
 import '../../../widgets/app_button.dart';
 import '../../../widgets/app_text_field.dart';
+import 'terms_and_policies_page.dart';
 
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
@@ -20,6 +21,7 @@ class _SignUpPageState extends State<SignUpPage> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   bool _isFormValid = false;
+  bool _acceptedTerms = false;
 
   @override
   void dispose() {
@@ -134,13 +136,59 @@ class _SignUpPageState extends State<SignUpPage> {
                       },
                       onFieldSubmitted: (_) => _submit(),
                     ),
+                    const SizedBox(height: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Checkbox(
+                          value: _acceptedTerms,
+                          onChanged: (v) =>
+                              setState(() => _acceptedTerms = v ?? false),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                const Text('Tôi đồng ý với '),
+                                InkWell(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const TermsAndPoliciesPage(),
+                                      ),
+                                    );
+                                  },
+                                  child: Text(
+                                    'Điều khoản & Chính sách',
+                                    style: TextStyle(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.primary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                const Text(
+                                  ' (bảo mật & tiêu chuẩn cộng đồng).',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 24),
                     BlocBuilder<AuthBloc, AuthState>(
                       builder: (context, state) {
                         final isLoading = state is AuthLoading;
                         return AppPrimaryButton(
                           text: 'Đăng Ký',
-                          onPressed: (isLoading || !_isFormValid)
+                          onPressed:
+                              (isLoading || !_isFormValid || !_acceptedTerms)
                               ? null
                               : _submit,
                           loading: isLoading,

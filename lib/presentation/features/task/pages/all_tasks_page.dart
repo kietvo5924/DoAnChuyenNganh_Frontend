@@ -46,7 +46,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
 
   void _fetchAllTasks() {
     // Nay dùng GetAllLocalTasks (đã sửa trong AllTasksBloc) -> tránh mất task sau khi sửa calendar
-    context.read<AllTasksBloc>().add(FetchAllTasks());
+    context.read<AllTasksBloc>().add(FetchAllTasks(date: _filterDate));
   }
 
   void _showCalendarSelectionDialog(BuildContext pageContext) {
@@ -271,6 +271,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
                             );
                             if (picked != null) {
                               setState(() => _filterDate = picked);
+                              _fetchAllTasks();
                             }
                           },
                         ),
@@ -279,7 +280,10 @@ class _AllTasksPageState extends State<AllTasksPage> {
                         tooltip: 'Xóa ngày',
                         onPressed: _filterDate == null
                             ? null
-                            : () => setState(() => _filterDate = null),
+                            : () {
+                                setState(() => _filterDate = null);
+                                _fetchAllTasks();
+                              },
                         icon: const Icon(Icons.clear),
                       ),
                     ],
@@ -344,19 +348,42 @@ class _AllTasksPageState extends State<AllTasksPage> {
                         final task = taskWithCalendar.task;
                         final calendar = taskWithCalendar.calendar;
 
+                        final day = (_filterDate ?? DateTime.now()).toLocal();
+                        final occurs = _occursOn(task, day);
+                        final canEdit = calendar.permissionLevel != 'VIEW_ONLY';
+                        final taskType = (task.repeatType == RepeatType.NONE)
+                            ? 'SINGLE'
+                            : 'RECURRING';
+                        final isCompleted = state.isCompleted(
+                          taskType: taskType,
+                          taskId: task.id,
+                        );
+
                         // CHANGED: build display text correctly
                         final startStr = _buildStartDisplay(task);
 
                         return ListTile(
                           key: ValueKey(task.id),
-                          leading: Icon(
-                            task.repeatType == RepeatType.NONE
-                                ? Icons.check_box_outline_blank
-                                : Icons.repeat,
+                          leading: Checkbox(
+                            value: occurs ? isCompleted : false,
+                            onChanged: (!canEdit || !occurs)
+                                ? null
+                                : (v) {
+                                    final checked = v ?? false;
+                                    context.read<AllTasksBloc>().add(
+                                      ToggleAllTasksCompletionForDate(
+                                        calendarId: calendar.id,
+                                        taskId: task.id,
+                                        repeatType: task.repeatType,
+                                        date: day,
+                                        completed: checked,
+                                      ),
+                                    );
+                                  },
                           ),
                           title: Text(task.title),
                           subtitle: Text(
-                            'Lịch: ${calendar.name} • Bắt đầu: $startStr',
+                            'Lịch: ${calendar.name} • Bắt đầu: $startStr • ${!occurs ? 'Không diễn ra ngày này' : (isCompleted ? 'Đã hoàn thành' : 'Chưa hoàn thành')}',
                           ),
                           onTap: () {
                             Navigator.push(
